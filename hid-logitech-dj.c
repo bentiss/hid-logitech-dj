@@ -805,6 +805,12 @@ static int logi_dj_probe(struct hid_device *hdev,
 
 	retval = logi_dj_recv_query_paired_devices(djrcv_dev);
 	if (retval < 0) {
+		if (retval == -EPIPE) {
+			dev_err(&hdev->dev, "%s: pipe stalled when probing for "
+				"associated devices, registering them later\n",
+				__func__);
+			return 0;
+		}
 		dev_err(&hdev->dev, "%s:logi_dj_recv_query_paired_devices "
 			"error:%d\n", __func__, retval);
 		goto logi_dj_recv_query_paired_devices_failed;
