@@ -1,5 +1,3 @@
-obj-m := .
-
 obj-$(CONFIG_HID_LOGITECH_DJ)    += hid-logitech-dj.o
 
 KDIR := /lib/modules/$(shell uname -r)/build
