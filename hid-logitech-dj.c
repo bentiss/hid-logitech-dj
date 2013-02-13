@@ -670,12 +670,23 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 			     struct hid_report *report, u8 *data,
 			     int size)
 {
+	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
 	struct dj_receiver_dev *djrcv_dev = hid_get_drvdata(hdev);
 	struct dj_report *dj_report = (struct dj_report *) data;
 	unsigned long flags;
 	bool report_processed = false;
 
-	dbg_hid("%s, size:%d\n", __func__, size);
+	/*
+	 * Interfaces 0 and 1 contain incoming data when the dj mode is not
+	 * activated
+	 */
+	if (intf->cur_altsetting->desc.bInterfaceNumber !=
+	    LOGITECH_DJ_INTERFACE_NUMBER) {
+		hid_dbg(hdev, "%s, report_id:%02x size:%d\n", __func__, dj_report->report_id, size);
+		return false;
+	}
+
+	hid_dbg(hdev, "%s, report_id:%02x size:%d\n", __func__, dj_report->report_id, size);
 
 	/* Here we receive all data coming from iface 2, there are 4 cases:
 	 *
@@ -737,13 +748,22 @@ static int logi_dj_probe(struct hid_device *hdev,
 	dbg_hid("%s called for ifnum %d\n", __func__,
 		intf->cur_altsetting->desc.bInterfaceNumber);
 
-	/* Ignore interfaces 0 and 1, they will not carry any data, dont create
-	 * any hid_device for them */
+	/*
+	 * Interfaces 0 and 1 contain incoming data when the dj mode is not
+	 * activated
+	 */
 	if (intf->cur_altsetting->desc.bInterfaceNumber !=
 	    LOGITECH_DJ_INTERFACE_NUMBER) {
 		dbg_hid("%s: ignoring ifnum %d\n", __func__,
 			intf->cur_altsetting->desc.bInterfaceNumber);
-		return -ENODEV;
+		retval = hid_parse(hdev);
+		if (retval != 0)
+			return retval;
+
+		retval = hid_hw_start(hdev, HID_CONNECT_DEFAULT);
+		if (retval)
+			return retval;
+		return 0;
 	}
 
 	/* Treat interface 2 */
@@ -847,11 +867,18 @@ static int logi_dj_reset_resume(struct hid_device *hdev)
 
 static void logi_dj_remove(struct hid_device *hdev)
 {
+	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
 	struct dj_receiver_dev *djrcv_dev = hid_get_drvdata(hdev);
 	struct dj_device *dj_dev;
 	int i;
 
 	dbg_hid("%s\n", __func__);
+
+	if (intf->cur_altsetting->desc.bInterfaceNumber !=
+	    LOGITECH_DJ_INTERFACE_NUMBER) {
+		hid_hw_stop(hdev);
+		return;
+	}
 
 	cancel_work_sync(&djrcv_dev->work);
 
