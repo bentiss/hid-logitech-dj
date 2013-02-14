@@ -852,6 +852,9 @@ static int logi_dj_reset_resume(struct hid_device *hdev)
 	int retval;
 	struct dj_receiver_dev *djrcv_dev = hid_get_drvdata(hdev);
 
+	if (!djrcv_dev)
+		return 0;
+
 	retval = logi_dj_recv_switch_to_dj_mode(djrcv_dev, 0);
 	if (retval < 0) {
 		dev_err(&hdev->dev,
