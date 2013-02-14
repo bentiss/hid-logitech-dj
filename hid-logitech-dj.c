@@ -775,6 +775,7 @@ static int logi_dj_probe(struct hid_device *hdev,
 	}
 
 	/* Treat interface 2 */
+	return -ENODEV;
 
 	djrcv_dev = kzalloc(sizeof(struct dj_receiver_dev), GFP_KERNEL);
 	if (!djrcv_dev) {
