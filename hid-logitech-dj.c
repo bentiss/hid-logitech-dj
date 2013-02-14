@@ -752,8 +752,18 @@ static int logi_dj_probe(struct hid_device *hdev,
 	 */
 	if (intf->cur_altsetting->desc.bInterfaceNumber !=
 	    LOGITECH_DJ_INTERFACE_NUMBER) {
-		dbg_hid("%s: ignoring ifnum %d\n", __func__,
-			intf->cur_altsetting->desc.bInterfaceNumber);
+		switch (intf->cur_altsetting->desc.bInterfaceNumber) {
+			case 0:
+				strlcpy(hdev->name,
+					"Logitech USB Receiver Keyboard",
+					sizeof(hdev->name));
+				break;
+			case 1:
+				strlcpy(hdev->name,
+					"Logitech USB Receiver Mouse",
+					sizeof(hdev->name));
+				break;
+		}
 		retval = hid_parse(hdev);
 		if (retval != 0)
 			return retval;
