@@ -6,7 +6,10 @@ default:
 	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules
 
 install: hid-logitech-dj.ko
-	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules_install
+	/bin/bash install.sh
+
+uninstall:
+	/bin/bash restore.sh
 
 clean:
 	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) clean
