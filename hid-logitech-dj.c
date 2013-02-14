@@ -670,7 +670,6 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 			     struct hid_report *report, u8 *data,
 			     int size)
 {
-	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
 	struct dj_receiver_dev *djrcv_dev = hid_get_drvdata(hdev);
 	struct dj_report *dj_report = (struct dj_report *) data;
 	unsigned long flags;
@@ -680,8 +679,7 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 	 * Interfaces 0 and 1 contain incoming data when the dj mode is not
 	 * activated
 	 */
-	if (intf->cur_altsetting->desc.bInterfaceNumber !=
-	    LOGITECH_DJ_INTERFACE_NUMBER) {
+	if (!djrcv_dev) {
 		hid_dbg(hdev, "%s, report_id:%02x size:%d\n", __func__, dj_report->report_id, size);
 		return false;
 	}
@@ -867,15 +865,13 @@ static int logi_dj_reset_resume(struct hid_device *hdev)
 
 static void logi_dj_remove(struct hid_device *hdev)
 {
-	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
 	struct dj_receiver_dev *djrcv_dev = hid_get_drvdata(hdev);
 	struct dj_device *dj_dev;
 	int i;
 
 	dbg_hid("%s\n", __func__);
 
-	if (intf->cur_altsetting->desc.bInterfaceNumber !=
-	    LOGITECH_DJ_INTERFACE_NUMBER) {
+	if (!djrcv_dev) {
 		hid_hw_stop(hdev);
 		return;
 	}
