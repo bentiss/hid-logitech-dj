@@ -36,6 +36,12 @@
 #define REPORT_ID_DJ_SHORT			0x20
 #define REPORT_ID_DJ_LONG			0x21
 
+#define REPORT_ID_HIDPP_SHORT			0x10
+#define REPORT_ID_HIDPP_LONG			0x11
+
+#define HIDPP_REPORT_SHORT_LENGTH		7
+#define HIDPP_REPORT_LONG_LENGTH		20
+
 #define REPORT_TYPE_RFREPORT_FIRST		0x01
 #define REPORT_TYPE_RFREPORT_LAST		0x1F
 
@@ -87,6 +93,10 @@
 #define MEDIA_CENTER				0x00000100
 #define KBD_LEDS				0x00004000
 
+
+#define DJ_DEVICE_ID_WIRELESS_TOUCHPAD		0x4011
+
+
 struct dj_report {
 	u8 report_id;
 	u8 device_index;
@@ -108,6 +118,7 @@ struct dj_device {
 	struct hid_device *hdev;
 	struct dj_receiver_dev *dj_receiver_dev;
 	u32 reports_supported;
+	u16 pid;
 	u8 device_index;
 };
 

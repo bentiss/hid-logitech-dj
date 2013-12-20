@@ -1,28 +1,26 @@
 #!/bin/bash
 
+MODULE_NAMES="hid_logitech_dj hid_logitech_hidpp hid_logitech_wtp"
+
 if [[ `id -u` != 0 ]]
 then
   echo "Must be run as root"
   exit 1
 fi
 
-WORKING_DIR=$(pwd)
-
-INSTALL_PATH=/lib/modules/`uname -r`/kernel/drivers/hid
-
-cd $INSTALL_PATH
-for i in *.ko.orig usbhid/*.ko.orig
+for MODULE_NAME in ${MODULE_NAMES}
 do
-  if [[ -e $i ]]
+  TARGET=${MODULE_NAME}.ko
+
+  INSTALL_PATH=/lib/modules/`uname -r`/extra
+
+  INSTALLED_TARGET=`find ${INSTALL_PATH} -name ${TARGET}`
+  if [[ -e ${INSTALLED_TARGET} ]]
   then
-    mv $i ${i%.orig}
+    echo "Removing installed module" ${INSTALLED_TARGET}
+    rm ${INSTALLED_TARGET}
   fi
 done
 
-
 echo "depmod -a"
 depmod -a
-
-echo "update-initramfs -u"
-update-initramfs -u
-
