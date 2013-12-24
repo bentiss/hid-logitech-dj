@@ -30,6 +30,12 @@
 #include "hid-ids.h"
 #include "hid-logitech-dj.h"
 
+static const struct hid_device_id log_dj_groups[] = {
+	{ HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH,
+		DJ_DEVICE_ID_WIRELESS_TOUCHPAD),
+		.driver_data = HID_GROUP_LOGITECH_DJ_DEVICE_WTP },
+};
+
 /* Keyboard descriptor (1) */
 static const char kbd_descriptor[] = {
 	0x05, 0x01,		/* USAGE_PAGE (generic Desktop)     */
@@ -267,6 +273,21 @@ static void logi_dj_recv_destroy_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	}
 }
 
+static u16 logi_dj_recv_get_device_group(struct hid_device *hdev)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(log_dj_groups) ; i++) {
+		const struct hid_device_id *id = &log_dj_groups[i];
+		if ((id->bus == hdev->bus) &&
+		    (id->vendor == hdev->vendor) &&
+		    (id->product == hdev->product))
+			return (u16) id->driver_data;
+	}
+
+	return HID_GROUP_LOGITECH_DJ_DEVICE_GENERIC;
+}
+
 static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 					  struct dj_report *dj_report)
 {
@@ -315,11 +336,15 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	dj_hiddev->dev.parent = &djrcv_hdev->dev;
 	dj_hiddev->bus = BUS_USB;
 	dj_hiddev->vendor = le16_to_cpu(usbdev->descriptor.idVendor);
-	dj_hiddev->product = le16_to_cpu(usbdev->descriptor.idProduct);
+	dj_hiddev->product =
+		(dj_report->report_params[ \
+			DEVICE_PAIRED_PARAM_EQUAD_ID_MSB] << 8) |
+		dj_report->report_params[DEVICE_PAIRED_PARAM_EQUAD_ID_LSB];
 	snprintf(dj_hiddev->name, sizeof(dj_hiddev->name),
-		"Logitech Unifying Device. Wireless PID:%02x%02x",
-		dj_report->report_params[DEVICE_PAIRED_PARAM_EQUAD_ID_MSB],
-		dj_report->report_params[DEVICE_PAIRED_PARAM_EQUAD_ID_LSB]);
+		"Logitech Unifying Device. Wireless PID:%04x",
+		dj_hiddev->product);
+
+	dj_hiddev->group = logi_dj_recv_get_device_group(dj_hiddev);
 
 	usb_make_path(usbdev, dj_hiddev->phys, sizeof(dj_hiddev->phys));
 	snprintf(tmpstr, sizeof(tmpstr), ":%d", dj_report->device_index);
@@ -338,9 +363,6 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	dj_dev->hdev = dj_hiddev;
 	dj_dev->dj_receiver_dev = djrcv_dev;
 	dj_dev->device_index = dj_report->device_index;
-	dj_dev->pid =
-		dj_report->report_params[DEVICE_PAIRED_PARAM_EQUAD_ID_MSB] << 8 |
-		dj_report->report_params[DEVICE_PAIRED_PARAM_EQUAD_ID_LSB];
 	dj_hiddev->driver_data = dj_dev;
 
 	djrcv_dev->paired_dj_devices[dj_report->device_index] = dj_dev;
@@ -525,7 +547,7 @@ static void logi_dj_recv_forward_raw_report(struct dj_receiver_dev *djrcv_dev,
 	if (!dj_dev)
 		return;
 
-	hid_input_report(dj_dev->hdev, HID_INPUT_REPORT, data, report->size, 1);
+	hid_input_report(dj_dev->hdev, HID_INPUT_REPORT, data, size, 1);
 }
 
 static int logi_dj_recv_send_report(struct dj_receiver_dev *djrcv_dev,
@@ -794,7 +816,7 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 	unsigned long flags;
 	bool report_processed = false;
 
-	dbg_hid("%s, size:%d\n", __func__, size);
+//	pr_err("%s, size:%d | %*ph \n", __func__, size, size, data);
 
 	/* Here we receive all data coming from iface 2, there are 4 cases:
 	 *
@@ -858,9 +880,6 @@ static int logi_dj_probe(struct hid_device *hdev,
 	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
 	struct dj_receiver_dev *djrcv_dev;
 	int retval;
-
-	if (is_dj_device((struct dj_device *)hdev->driver_data))
-		return -ENODEV;
 
 	dbg_hid("%s called for ifnum %d\n", __func__,
 		intf->cur_altsetting->desc.bInterfaceNumber);
@@ -1014,31 +1033,6 @@ static void logi_dj_remove(struct hid_device *hdev)
 	hid_set_drvdata(hdev, NULL);
 }
 
-static const u16 dj_have_special_driver[] = {
-	DJ_DEVICE_ID_WIRELESS_TOUCHPAD,
-};
-
-static int logi_djdevice_probe(struct hid_device *hdev,
-			 const struct hid_device_id *id)
-{
-	int ret, i;
-	struct dj_device *dj_dev = hdev->driver_data;
-
-	if (!is_dj_device(dj_dev))
-		return -ENODEV;
-
-	for (i = 0; i < ARRAY_SIZE(dj_have_special_driver) ; i++) {
-		if (dj_have_special_driver[i] == dj_dev->pid)
-			return -ENODEV;
-	}
-
-	ret = hid_parse(hdev);
-	if (!ret)
-		ret = hid_hw_start(hdev, HID_CONNECT_DEFAULT);
-
-	return ret;
-}
-
 static const struct hid_device_id logi_dj_receivers[] = {
 	{HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH,
 		USB_DEVICE_ID_LOGITECH_UNIFYING_RECEIVER)},
@@ -1062,17 +1056,14 @@ static struct hid_driver logi_djreceiver_driver = {
 
 
 static const struct hid_device_id logi_dj_devices[] = {
-	{HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH,
-		USB_DEVICE_ID_LOGITECH_UNIFYING_RECEIVER)},
-	{HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH,
-		USB_DEVICE_ID_LOGITECH_UNIFYING_RECEIVER_2)},
+	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_GENERIC,
+		USB_VENDOR_ID_LOGITECH, HID_ANY_ID)},
 	{}
 };
 
 static struct hid_driver logi_djdevice_driver = {
 	.name = "logitech-djdevice",
 	.id_table = logi_dj_devices,
-	.probe = logi_djdevice_probe,
 };
 
 

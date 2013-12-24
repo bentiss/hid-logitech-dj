@@ -53,7 +53,7 @@ struct wtp_data {
 static int wtp_create_input(struct hidpp_device *hidpp_dev)
 {
 	struct hid_device *hdev = hidpp_dev->hid_dev;
-	struct wtp_data *wd = (struct wtp_data *)hidpp_dev->driver_data;
+	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
 	struct input_dev *input_dev = devm_input_allocate_device(&hdev->dev);
 
 	if (!input_dev) {
@@ -64,12 +64,10 @@ static int wtp_create_input(struct hidpp_device *hidpp_dev)
 	input_dev->name = wd->name;
 	input_dev->phys = hdev->phys;
 	input_dev->uniq = hdev->uniq;
-	input_dev->id.bustype = BUS_USB;
-	input_dev->id.vendor  = USB_VENDOR_ID_LOGITECH;
-	input_dev->id.product = DJ_DEVICE_ID_WIRELESS_TOUCHPAD;
+	input_dev->id.bustype = hidpp_dev->hid_dev->bus;
+	input_dev->id.vendor  = hidpp_dev->hid_dev->vendor;
+	input_dev->id.product = hidpp_dev->hid_dev->product;
 	input_dev->id.version = 0;
-
-	wd->input = input_dev;
 
 	__set_bit(BTN_TOUCH, input_dev->keybit);
 	__set_bit(BTN_TOOL_FINGER, input_dev->keybit);
@@ -93,6 +91,8 @@ static int wtp_create_input(struct hidpp_device *hidpp_dev)
 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y, 0, wd->y_size, 0, 0);
 	input_set_abs_params(input_dev, ABS_X, 0, wd->x_size, 0, 0);
 	input_set_abs_params(input_dev, ABS_Y, 0, wd->y_size, 0, 0);
+
+	wd->input = input_dev;
 
 	return input_register_device(input_dev);
 }
@@ -132,9 +132,9 @@ static int wtp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev,
 		struct hidpp_report *report)
 {
 	struct hidpp_touchpad_raw_xy raw;
-	struct wtp_data *wd = (struct wtp_data *)hidpp_dev->driver_data;
+	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
 
-	if (!hidpp_dev->initialized)
+	if (!wd->input)
 		return 0;
 
 	hidpp_touchpad_raw_xy_event(hidpp_dev, report, &raw);
@@ -154,11 +154,15 @@ static int wtp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev,
 	return 1;
 }
 
-static int wtp_raw_event(struct hidpp_device *hidpp_dev,
+static int wtp_raw_event(struct hid_device *hdev, struct hid_report *hreport,
 			 u8 *data, int size)
 {
-	struct wtp_data *wd = (struct wtp_data *)hidpp_dev->driver_data;
+	struct hidpp_device *hidpp_dev = hid_get_drvdata(hdev);
+	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
 	struct hidpp_report *report = (struct hidpp_report *)data;
+
+	if (hidpp_raw_event(hidpp_dev, data, size))
+		return 1;
 
 	if (!wd->input)
 		return 1;
@@ -179,20 +183,26 @@ static int wtp_raw_event(struct hidpp_device *hidpp_dev,
 	return 0;
 }
 
-static int wtp_device_init(struct hidpp_device *hidpp_device)
+static int wtp_init(struct hidpp_device *hidpp_dev)
 {
 	struct hidpp_touchpad_raw_info raw_info;
-	struct wtp_data *wd = (struct wtp_data *)hidpp_device->driver_data;
+	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
 	u8 name_length;
 	u8 feature_type;
 	char *name;
+	int ret;
 
-	hidpp_root_get_feature(hidpp_device, HIDPP_PAGE_TOUCHPAD_RAW_XY,
+	ret = hidpp_root_get_feature(hidpp_dev, HIDPP_PAGE_TOUCHPAD_RAW_XY,
 		&wd->mt_feature_index, &feature_type);
+	if (ret) {
+		pr_err("%s  %s:%d\n", __func__, __FILE__, __LINE__);
+		/* means that the device is not powered up */
+		return ret;
+	}
 
-	name = hidpp_get_device_name(hidpp_device, &name_length);
+	name = hidpp_get_device_name(hidpp_dev, &name_length);
 	if (name) {
-		wd->name = devm_kzalloc(&hidpp_device->hid_dev->dev,
+		wd->name = devm_kzalloc(&hidpp_dev->hid_dev->dev,
 					name_length, GFP_KERNEL);
 		if (wd->name)
 			memcpy(wd->name, name, name_length);
@@ -201,35 +211,39 @@ static int wtp_device_init(struct hidpp_device *hidpp_device)
 		wd->name = "Logitech Wireless Touchpad";
 	}
 
-	hidpp_touchpad_set_raw_report_state(hidpp_device, wd->mt_feature_index,
+	hidpp_touchpad_set_raw_report_state(hidpp_dev, wd->mt_feature_index,
 		true, true, true);
-	hidpp_touchpad_get_raw_info(hidpp_device, wd->mt_feature_index,
+	hidpp_touchpad_get_raw_info(hidpp_dev, wd->mt_feature_index,
 		&raw_info);
 
 	wd->x_size = raw_info.x_size;
 	wd->y_size = raw_info.y_size;
 	wd->maxcontacts = raw_info.maxcontacts;
 
-	return wtp_create_input(hidpp_device);
+	return wtp_create_input(hidpp_dev);
+};
+
+static void wtp_device_connect(struct hidpp_device *hidpp_dev, bool connected)
+{
+	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
+
+	pr_err("%s connected: %d %s:%d\n", __func__, connected, __FILE__, __LINE__);
+
+	if (wd->input || !connected)
+		return;
+
+	wtp_init(hidpp_dev);
 }
 
 static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
-	struct dj_device *dj_dev = hdev->driver_data;
 	struct wtp_data *wd;
-	struct hidpp_device *hidpp_device;
+	struct hidpp_device *hidpp_dev;
 	int ret;
 
-	if (!is_dj_device(dj_dev))
-		return -ENODEV;
-
-	if (dj_dev->pid != DJ_DEVICE_ID_WIRELESS_TOUCHPAD)
-		return -ENODEV;
-
-	hidpp_device = devm_kzalloc(&hdev->dev, sizeof(struct hidpp_device),
-			GFP_KERNEL);
-	if (!hidpp_device) {
-		hid_err(hdev, "cannot allocate hidpp_device\n");
+	hidpp_dev = devm_hidpp_allocate(hdev);
+	if (!hidpp_dev) {
+		hid_err(hdev, "cannot allocate hidpp_dev\n");
 		return -ENOMEM;
 	}
 
@@ -239,40 +253,27 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		return -ENOMEM;
 	}
 
-	hidpp_device->driver_data = (void *)wd;
+	hidpp_set_drvdata(hidpp_dev, wd);
 
-	hid_set_drvdata(hdev, hidpp_device);
+	hid_set_drvdata(hdev, hidpp_dev);
 
-	hidpp_device->device_init = wtp_device_init;
-	hidpp_device->raw_event = wtp_raw_event;
-
-	ret = hidpp_init(hidpp_device, hdev);
-	if (ret) {
-		hid_set_drvdata(hdev, NULL);
-		return -ENODEV;
-	}
+	hidpp_dev->device_connect = wtp_device_connect;
 
 	ret = hid_parse(hdev);
 	if (!ret)
 		ret = hid_hw_start(hdev, HID_CONNECT_HIDRAW);
 
+	/* try init */
+	hid_device_io_start(hdev);
+	if (wtp_init(hidpp_dev))
+		hid_dbg(hdev, "wtp_init returned an error, postponing the input creation until the device connects.");
+
 	return ret;
 }
 
-static void wtp_remove(struct hid_device *hdev)
-{
-	struct hidpp_device *hidpp_device = hid_get_drvdata(hdev);
-
-	hid_hw_stop(hdev);
-	hid_set_drvdata(hdev, NULL);
-	hidpp_remove(hidpp_device);
-}
-
 static const struct hid_device_id wtp_devices[] = {
-	{HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH,
-		USB_DEVICE_ID_LOGITECH_UNIFYING_RECEIVER)},
-	{HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH,
-		USB_DEVICE_ID_LOGITECH_UNIFYING_RECEIVER_2)},
+	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
+		USB_VENDOR_ID_LOGITECH, HID_ANY_ID)},
 	{ }
 };
 MODULE_DEVICE_TABLE(hid, wtp_devices);
@@ -281,9 +282,7 @@ static struct hid_driver wtp_driver = {
 	.name = "wtp-touch",
 	.id_table = wtp_devices,
 	.probe = wtp_probe,
-	.remove = wtp_remove,
-	.raw_event = hidpp_raw_event,
+	.raw_event = wtp_raw_event,
 };
 
 module_hid_driver(wtp_driver)
-

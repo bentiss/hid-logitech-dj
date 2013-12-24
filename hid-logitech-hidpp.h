@@ -2,7 +2,7 @@
 #define __HID_LOGITECH_HIDPP_H
 
 /*
- *  hidpp_dev protocol for Logitech Unifying receivers
+ *  HIDPP protocol for Logitech Unifying receivers
  *
  *  Copyright (c) 2011 Logitech (c)
  *  Copyright (c) 2012-2013 Google (c)
@@ -38,7 +38,7 @@
 #define HIDPP_REPORT_LONG_LENGTH		20
 
 /*
- * There are two hidpp_dev protocols in use, the first version hidpp10 is known
+ * There are two hidpp protocols in use, the first version hidpp10 is known
  * as register access protocol or RAP, the second version hidpp20 is known as
  * feature access protocol or FAP
  *
@@ -85,28 +85,39 @@ struct hidpp_device {
 	struct hid_device *hid_dev;
 	void *driver_data;
 
-	int (*raw_event)(struct hidpp_device *hidpp_dev,
-			 u8 *report, int size);
-	int (*device_init)(struct hidpp_device *hidpp_dev);
+	void (*device_connect)(struct hidpp_device *hidpp_dev, bool connected);
 
 	/* private */
 	struct work_struct work;
 	struct mutex send_mutex;
 	struct kfifo delayed_work_fifo;
-	spinlock_t lock;
+	spinlock_t delayed_work_lock;
 	void *send_receive_buf;
 	wait_queue_head_t wait;
 	bool answer_available;
-	bool initialized;
-	int init_retry;
+	bool devres_managed;
 };
 
-extern int hidpp_raw_event(struct hid_device *hdev, struct hid_report *report,
-			   u8 *data, int size);
+static inline void *hidpp_get_drvdata(struct hidpp_device *hidpp_dev)
+{
+	return hidpp_dev->driver_data;
+}
 
-extern int hidpp_init(struct hidpp_device *hidpp_dev,
-		      struct hid_device *hid_dev);
-extern void hidpp_remove(struct hidpp_device *hidpp_dev);
+static inline void hidpp_set_drvdata(struct hidpp_device *hidpp_dev, void *data)
+{
+	hidpp_dev->driver_data = data;
+}
+
+extern int hidpp_send_fap_command_sync(struct hidpp_device *hidpp_dev,
+	u8 feat_index, u8 funcindex_clientid, u8 *params, int param_count,
+	struct hidpp_report *response);
+extern int hidpp_send_rap_command_sync(struct hidpp_device *hidpp_dev,
+	u8 report_id, u8 sub_id, u8 reg_address, u8 *params, int param_count,
+	struct hidpp_report *response);
+
+extern int hidpp_raw_event(struct hidpp_device *hidpp_dev, u8 *data, int size);
+
+extern struct hidpp_device *devm_hidpp_allocate(struct hid_device *hid_dev);
 
 #define HIDPP_ERROR				0x8f
 #define HIDPP_ERROR_SUCCESS			0x00
@@ -123,23 +134,15 @@ extern void hidpp_remove(struct hidpp_device *hidpp_dev);
 #define HIDPP_ERROR_INVALID_PARAM_VALUE		0x0b
 #define HIDPP_ERROR_WRONG_PIN_CODE		0x0c
 
-#define HIDPP_TYPE_KEYBOARD			0x00
-#define HIDPP_TYPE_REMOTE_CONTROL		0x01
-#define HIDPP_TYPE_NUMPAD			0x02
-#define HIDPP_TYPE_MOUSE			0x03
-#define HIDPP_TYPE_TOUCHPAD			0x04
-#define HIDPP_TYPE_TRACKBALL			0x05
-#define HIDPP_TYPE_PRESENTER			0x06
-#define HIDPP_TYPE_RECEIVER			0x07
+
+
 
 /* -------------------------------------------------------------------------- */
-/* 0x0000: Root								      */
+/* 0x0000: Root                                                               */
 /* -------------------------------------------------------------------------- */
 
 #define HIDPP_PAGE_ROOT					0x0000
-
-#define CMD_ROOT_GET_FEATURE				0x01
-#define CMD_ROOT_GET_PROTOCOL_VERSION			0x11
+#define HIDPP_PAGE_ROOT_IDX				0x00
 
 extern int hidpp_root_get_feature(struct hidpp_device *hidpp_dev, u16 feature,
 	u8 *feature_index, u8 *feature_type);
@@ -147,23 +150,10 @@ extern int hidpp_root_get_protocol_version(struct hidpp_device *hidpp_dev,
 	u8 *protocol_major, u8 *protocol_minor);
 
 /* -------------------------------------------------------------------------- */
-/* 0x0005: GetDeviceNameType						      */
+/* 0x0005: GetDeviceNameType                                                  */
 /* -------------------------------------------------------------------------- */
 
 #define HIDPP_PAGE_GET_DEVICE_NAME_TYPE			0x0005
-
-#define CMD_GET_DEVICE_NAME_TYPE_GET_COUNT		0x01
-#define CMD_GET_DEVICE_NAME_TYPE_GET_DEVICE_NAME	0x11
-#define CMD_GET_DEVICE_NAME_TYPE_GET_TYPE		0x21
-
-#define HIDPP_TYPE_KEYBOARD				0x00
-#define HIDPP_TYPE_REMOTE_CONTROL			0x01
-#define HIDPP_TYPE_NUMPAD				0x02
-#define HIDPP_TYPE_MOUSE				0x03
-#define HIDPP_TYPE_TOUCHPAD				0x04
-#define HIDPP_TYPE_TRACKBALL				0x05
-#define HIDPP_TYPE_PRESENTER				0x06
-#define HIDPP_TYPE_RECEIVER				0x07
 
 extern int hidpp_get_device_name_type_get_count(struct hidpp_device *hidpp_dev,
 	u8 feature_index, u8 *nameLength);
@@ -180,9 +170,6 @@ extern char *hidpp_get_device_name(struct hidpp_device *hidpp_dev, u8 *name_leng
 
 #define HIDPP_PAGE_TOUCHPAD_RAW_XY			0x6100
 
-#define CMD_TOUCHPAD_GET_RAW_INFO			0x01
-#define CMD_TOUCHPAD_GET_RAW_REPORT_STATE		0x11
-#define CMD_TOUCHPAD_SET_RAW_REPORT_STATE		0x21
 #define EVENT_TOUCHPAD_RAW_XY				0x30
 #define EVENT_TOUCHPAD_RAW_XY_				0x00
 
@@ -218,9 +205,9 @@ struct hidpp_touchpad_raw_xy {
 extern int hidpp_touchpad_get_raw_info(struct hidpp_device *hidpp_dev,
 	u8 feature_index, struct hidpp_touchpad_raw_info *raw_info);
 
-extern int hidpp_touchpad_get_raw_report_state(struct hidpp_device *hidpp_dev,
-	u8 feature_index, bool *send_raw_reports, bool *force_vs_area,
-	bool *sensor_enhanced_settings);
+//extern int hidpp_touchpad_get_raw_report_state(struct hidpp_device *hidpp_dev,
+//	u8 feature_index, bool *send_raw_reports, bool *force_vs_area,
+//	bool *sensor_enhanced_settings);
 
 extern int hidpp_touchpad_set_raw_report_state(struct hidpp_device *hidpp_dev,
 		u8 feature_index, bool send_raw_reports, bool force_vs_area,
