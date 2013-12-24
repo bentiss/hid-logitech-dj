@@ -29,6 +29,7 @@
 #include <asm/unaligned.h>
 #include "hid-ids.h"
 #include "hid-logitech-dj.h"
+#include "hid-logitech-hidpp.h"
 
 static const struct hid_device_id log_dj_groups[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH,
@@ -345,6 +346,7 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 		dj_hiddev->product);
 
 	dj_hiddev->group = logi_dj_recv_get_device_group(dj_hiddev);
+	dj_hiddev->product = le16_to_cpu(usbdev->descriptor.idProduct);
 
 	usb_make_path(usbdev, dj_hiddev->phys, sizeof(dj_hiddev->phys));
 	snprintf(tmpstr, sizeof(tmpstr), ":%d", dj_report->device_index);
