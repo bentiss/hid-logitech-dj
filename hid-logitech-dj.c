@@ -823,7 +823,6 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 			    STATUS_LINKLOSS) {
 				logi_dj_recv_forward_null_report(djrcv_dev, dj_report);
 			}
-			logi_dj_recv_forward_raw_report(djrcv_dev, dj_report, report, data, size);
 			break;
 		default:
 			logi_dj_recv_forward_report(djrcv_dev, dj_report);
