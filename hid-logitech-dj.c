@@ -254,7 +254,6 @@ static struct hid_ll_driver logi_dj_ll_driver;
 static int logi_dj_output_hidraw_report(struct hid_device *hid, u8 * buf,
 					size_t count,
 					unsigned char report_type);
-static int logi_dj_recv_query_paired_devices(struct dj_receiver_dev *djrcv_dev);
 
 static void logi_dj_recv_destroy_djhid_device(struct dj_receiver_dev *djrcv_dev,
 						struct dj_report *dj_report)
@@ -310,7 +309,6 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	if (dj_report->report_params[DEVICE_PAIRED_PARAM_SPFUNCTION] &
 	    SPFUNCTION_DEVICE_LIST_EMPTY) {
 		dbg_hid("%s: device list is empty\n", __func__);
-		djrcv_dev->querying_devices = false;
 		return;
 	}
 
@@ -318,12 +316,6 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	    (dj_report->device_index > DJ_DEVICE_INDEX_MAX)) {
 		dev_err(&djrcv_hdev->dev, "%s: invalid device index:%d\n",
 			__func__, dj_report->device_index);
-		return;
-	}
-
-	if (djrcv_dev->paired_dj_devices[dj_report->device_index]) {
-		/* The device is already known. No need to reallocate it. */
-		dbg_hid("%s: device is already known\n", __func__);
 		return;
 	}
 
@@ -395,7 +387,6 @@ static void delayedwork_callback(struct work_struct *work)
 	struct dj_report dj_report;
 	unsigned long flags;
 	int count;
-	int retval;
 
 	dbg_hid("%s\n", __func__);
 
@@ -428,25 +419,6 @@ static void delayedwork_callback(struct work_struct *work)
 		logi_dj_recv_destroy_djhid_device(djrcv_dev, &dj_report);
 		break;
 	default:
-	/* A normal report (i. e. not belonging to a pair/unpair notification)
-	 * arriving here, means that the report arrived but we did not have a
-	 * paired dj_device associated to the report's device_index, this
-	 * means that the original "device paired" notification corresponding
-	 * to this dj_device never arrived to this driver. The reason is that
-	 * hid-core discards all packets coming from a device while probe() is
-	 * executing. */
-	if (!djrcv_dev->paired_dj_devices[dj_report.device_index]) {
-		/* ok, we don't know the device, just re-ask the
-		 * receiver for the list of connected devices. */
-		retval = logi_dj_recv_query_paired_devices(djrcv_dev);
-		if (!retval) {
-			/* everything went fine, so just leave */
-			break;
-		}
-		dev_err(&djrcv_dev->hdev->dev,
-			"%s:logi_dj_recv_query_paired_devices "
-			"error:%d\n", __func__, retval);
-		}
 		dbg_hid("%s: unexpected report type\n", __func__);
 	}
 }
@@ -477,12 +449,6 @@ static void logi_dj_recv_forward_null_report(struct dj_receiver_dev *djrcv_dev,
 	if (!djdev) {
 		dbg_hid("djrcv_dev->paired_dj_devices[dj_report->device_index]"
 			" is NULL, index %d\n", dj_report->device_index);
-		kfifo_in(&djrcv_dev->notif_fifo, dj_report, sizeof(struct dj_report));
-
-		if (schedule_work(&djrcv_dev->work) == 0) {
-			dbg_hid("%s: did not schedule the work item, was already "
-			"queued\n", __func__);
-		}
 		return;
 	}
 
@@ -513,12 +479,6 @@ static void logi_dj_recv_forward_report(struct dj_receiver_dev *djrcv_dev,
 	if (dj_device == NULL) {
 		dbg_hid("djrcv_dev->paired_dj_devices[dj_report->device_index]"
 			" is NULL, index %d\n", dj_report->device_index);
-		kfifo_in(&djrcv_dev->notif_fifo, dj_report, sizeof(struct dj_report));
-
-		if (schedule_work(&djrcv_dev->work) == 0) {
-			dbg_hid("%s: did not schedule the work item, was already "
-			"queued\n", __func__);
-		}
 		return;
 	}
 
@@ -585,10 +545,6 @@ static int logi_dj_recv_query_paired_devices(struct dj_receiver_dev *djrcv_dev)
 	struct dj_report *dj_report;
 	int retval;
 
-	/* no need to protect djrcv_dev->querying_devices */
-	if (djrcv_dev->querying_devices)
-		return 0;
-
 	dj_report = kzalloc(sizeof(struct dj_report), GFP_KERNEL);
 	if (!dj_report)
 		return -ENOMEM;
@@ -599,7 +555,6 @@ static int logi_dj_recv_query_paired_devices(struct dj_receiver_dev *djrcv_dev)
 	kfree(dj_report);
 	return retval;
 }
-
 
 static int logi_dj_recv_switch_to_dj_mode(struct dj_receiver_dev *djrcv_dev,
 					  unsigned timeout)
@@ -617,6 +572,14 @@ static int logi_dj_recv_switch_to_dj_mode(struct dj_receiver_dev *djrcv_dev,
 	dj_report->report_params[CMD_SWITCH_PARAM_TIMEOUT_SECONDS] = (u8)timeout;
 	retval = logi_dj_recv_send_report(djrcv_dev, dj_report);
 	kfree(dj_report);
+
+	/*
+	 * Ugly sleep to work around a USB 3.0 bug when the receiver is still
+	 * processing the "switch-to-dj" command while we send an other command.
+	 * 50 msec should gives enough time to the receiver to be ready.
+	 */
+	msleep(50);
+
 	return retval;
 }
 
@@ -821,7 +784,7 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 	unsigned long flags;
 	bool report_processed = false;
 
-//	pr_err("%s, size:%d | %*ph \n", __func__, size, size, data);
+	dbg_hid("%s, size:%d\n", __func__, size);
 
 	/* Here we receive all data coming from iface 2, there are 4 cases:
 	 *
