@@ -105,12 +105,12 @@ static int hidpp_send_message_sync(struct hidpp_device *hidpp_dev,
 				10*HZ)) {
 		dbg_hid("%s:timeout waiting for response\n", __func__);
 		memset(response, 0, sizeof(struct hidpp_report));
-		ret = -1;
+		ret = -ETIMEDOUT;
 	}
 
 	if (response->report_id == REPORT_ID_HIDPP_SHORT &&
 	    response->fap.feature_index == HIDPP_ERROR) {
-		ret = response->fap.params[0];
+		ret = response->fap.params[1];
 		dbg_hid("__hidpp_send_report got hidpp error %02X\n", ret);
 		goto exit;
 	}
