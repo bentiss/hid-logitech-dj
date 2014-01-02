@@ -862,7 +862,8 @@ static int logi_dj_probe(struct hid_device *hdev,
 
 	/* Treat interface 2 */
 
-	djrcv_dev = kzalloc(sizeof(struct dj_receiver_dev), GFP_KERNEL);
+	djrcv_dev = devm_kzalloc(&hdev->dev, sizeof(struct dj_receiver_dev),
+				GFP_KERNEL);
 	if (!djrcv_dev) {
 		dev_err(&hdev->dev,
 			"%s:failed allocating dj_receiver_dev\n", __func__);
@@ -876,7 +877,6 @@ static int logi_dj_probe(struct hid_device *hdev,
 			GFP_KERNEL)) {
 		dev_err(&hdev->dev,
 			"%s:failed allocating notif_fifo\n", __func__);
-		kfree(djrcv_dev);
 		return -ENOMEM;
 	}
 	hid_set_drvdata(hdev, djrcv_dev);
@@ -944,8 +944,8 @@ switch_to_dj_mode_fail:
 
 hid_hw_start_fail:
 hid_parse_fail:
+hidpp_fail:
 	kfifo_free(&djrcv_dev->notif_fifo);
-	kfree(djrcv_dev);
 	hid_set_drvdata(hdev, NULL);
 	return retval;
 
@@ -996,7 +996,6 @@ static void logi_dj_remove(struct hid_device *hdev)
 	}
 
 	kfifo_free(&djrcv_dev->notif_fifo);
-	kfree(djrcv_dev);
 	hid_set_drvdata(hdev, NULL);
 }
 
