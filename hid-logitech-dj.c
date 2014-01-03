@@ -430,6 +430,9 @@ static void delayedwork_callback(struct work_struct *work)
 
 	spin_unlock_irqrestore(&djrcv_dev->lock, flags);
 
+	/* enable hid++ wireless notifications */
+	hidpp_enable_notifications(djrcv_dev->hidpp_dev, true, true);
+
 	switch (dj_report.report_type) {
 	case REPORT_TYPE_NOTIF_DEVICE_PAIRED:
 		logi_dj_recv_add_djhid_device(djrcv_dev, &dj_report);
