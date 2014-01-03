@@ -24,6 +24,7 @@
  */
 
 #include <linux/kfifo.h>
+#include "hid-logitech-hidpp.h"
 
 #define DJ_MAX_PAIRED_DEVICES			6
 #define DJ_MAX_NUMBER_NOTIFICATIONS		8
@@ -35,12 +36,6 @@
 
 #define REPORT_ID_DJ_SHORT			0x20
 #define REPORT_ID_DJ_LONG			0x21
-
-#define REPORT_ID_HIDPP_SHORT			0x10
-#define REPORT_ID_HIDPP_LONG			0x11
-
-#define HIDPP_REPORT_SHORT_LENGTH		7
-#define HIDPP_REPORT_LONG_LENGTH		20
 
 #define REPORT_TYPE_RFREPORT_FIRST		0x01
 #define REPORT_TYPE_RFREPORT_LAST		0x1F
@@ -104,6 +99,7 @@ struct dj_receiver_dev {
 	struct hid_device *hdev;
 	struct dj_device *paired_dj_devices[DJ_MAX_PAIRED_DEVICES +
 					    DJ_DEVICE_INDEX_MIN];
+	struct hidpp_device *hidpp_dev;
 	struct work_struct work;
 	struct kfifo notif_fifo;
 	spinlock_t lock;

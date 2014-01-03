@@ -396,6 +396,66 @@ int hidpp_raw_event(struct hidpp_device *hidpp_dev, u8 *data, int size)
 EXPORT_SYMBOL_GPL(hidpp_raw_event);
 
 /* -------------------------------------------------------------------------- */
+/* HIDP++ 1.0 commands                                                        */
+/* -------------------------------------------------------------------------- */
+
+#define HIDPP_SET_REGISTER				0x80
+#define HIDPP_GET_REGISTER				0x81
+#define HIDPP_SET_LONG_REGISTER				0x82
+#define HIDPP_GET_LONG_REGISTER				0x83
+
+#define HIDPP_REG_ENABLE_HIDPP_NOTIFICATIONS		0x00
+#define ENABLE_HIDPP_WIRELESS_BIT			0
+#define ENABLE_HIDPP_SOFTWARE_BIT			3
+
+int hidpp_enable_notifications(struct hidpp_device *hidpp_dev,
+	bool wireless_notifs, bool software_present)
+{
+	struct hidpp_report response;
+	u8 params[3] = { 0x00,
+			 ((!!wireless_notifs) << ENABLE_HIDPP_WIRELESS_BIT)
+			 | ((!!software_present) << ENABLE_HIDPP_SOFTWARE_BIT),
+			 0x00 };
+
+	return hidpp_send_rap_command_sync(hidpp_dev, REPORT_ID_HIDPP_SHORT,
+					HIDPP_SET_REGISTER,
+					HIDPP_REG_ENABLE_HIDPP_NOTIFICATIONS,
+					params, 3, &response);
+
+}
+EXPORT_SYMBOL_GPL(hidpp_enable_notifications);
+
+#define HIDPP_REG_PAIRING_INFORMATION			0xB5
+#define DEVICE_NAME					0x40
+
+char *hidpp_get_unifying_name(struct hidpp_device *hidpp_dev, int device_index)
+{
+	struct hidpp_report response;
+	int ret;
+	u8 params[1] = { DEVICE_NAME | (device_index - 1) };
+	char *name;
+	int len;
+
+	ret = hidpp_send_rap_command_sync(hidpp_dev,
+					REPORT_ID_HIDPP_SHORT,
+					HIDPP_GET_LONG_REGISTER,
+					HIDPP_REG_PAIRING_INFORMATION,
+					params, 1, &response);
+	if (ret)
+		return NULL;
+
+	len = response.rap.params[1];
+
+	name = kzalloc(len + 1, GFP_KERNEL);
+	if (!name)
+		return NULL;
+
+	memcpy(name, &response.rap.params[2], len);
+	return name;
+}
+EXPORT_SYMBOL_GPL(hidpp_get_unifying_name);
+
+/* -------------------------------------------------------------------------- */
 /* 0x0000: Root                                                               */
 /* -------------------------------------------------------------------------- */
 

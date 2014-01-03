@@ -139,8 +139,15 @@ extern struct hidpp_device *devm_hidpp_allocate(struct hid_device *hid_dev);
 #define HIDPP_ERROR_INVALID_PARAM_VALUE		0x0b
 #define HIDPP_ERROR_WRONG_PIN_CODE		0x0c
 
+/* -------------------------------------------------------------------------- */
+/* HIDP++ 1.0 commands                                                        */
+/* -------------------------------------------------------------------------- */
 
+extern int hidpp_enable_notifications(struct hidpp_device *hidpp_dev,
+	bool wireless_notifications, bool software_present);
 
+extern char *hidpp_get_unifying_name(struct hidpp_device *hidpp_dev,
+	int device_index);
 
 /* -------------------------------------------------------------------------- */
 /* 0x0000: Root                                                               */

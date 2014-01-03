@@ -300,6 +300,7 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	struct usb_device *usbdev = interface_to_usbdev(intf);
 	struct hid_device *dj_hiddev;
 	struct dj_device *dj_dev;
+	char *name;
 
 	/* Device index goes from 1 to 6, we need 3 bytes to store the
 	 * semicolon, the index, and a null terminator
@@ -316,6 +317,12 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	    (dj_report->device_index > DJ_DEVICE_INDEX_MAX)) {
 		dev_err(&djrcv_hdev->dev, "%s: invalid device index:%d\n",
 			__func__, dj_report->device_index);
+		return;
+	}
+
+	if (djrcv_dev->paired_dj_devices[dj_report->device_index]) {
+		/* The device is already known. No need to reallocate it. */
+		dbg_hid("%s: device is already known\n", __func__);
 		return;
 	}
 
@@ -339,6 +346,18 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	snprintf(dj_hiddev->name, sizeof(dj_hiddev->name),
 		"Logitech Unifying Device. Wireless PID:%04x",
 		dj_hiddev->product);
+
+	name = hidpp_get_unifying_name(djrcv_dev->hidpp_dev,
+					dj_report->device_index);
+
+	if (name) {
+		snprintf(dj_hiddev->name, sizeof(dj_hiddev->name), "%s", name);
+		kfree(name);
+	} else {
+		snprintf(dj_hiddev->name, sizeof(dj_hiddev->name),
+			"Logitech Unifying Device. Wireless PID:%04x",
+			dj_hiddev->product);
+	}
 
 	dj_hiddev->group = logi_dj_recv_get_device_group(dj_hiddev);
 	dj_hiddev->product = le16_to_cpu(usbdev->descriptor.idProduct);
@@ -832,8 +851,9 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 	case REPORT_ID_HIDPP_SHORT:
 		/* intentional fallthrough */
 	case REPORT_ID_HIDPP_LONG:
-		logi_dj_recv_forward_raw_report(djrcv_dev, dj_report,
-						report, data, size);
+		if (!hidpp_raw_event(djrcv_dev->hidpp_dev, data, size))
+			logi_dj_recv_forward_raw_report(djrcv_dev, dj_report,
+							report, data, size);
 		break;
 	}
 	spin_unlock_irqrestore(&djrcv_dev->lock, flags);
@@ -880,6 +900,12 @@ static int logi_dj_probe(struct hid_device *hdev,
 		return -ENOMEM;
 	}
 	hid_set_drvdata(hdev, djrcv_dev);
+
+	djrcv_dev->hidpp_dev = devm_hidpp_allocate(hdev);
+	if (!djrcv_dev->hidpp_dev) {
+		retval = -ENOMEM;
+		goto hidpp_fail;
+	}
 
 	/* Call  to usbhid to fetch the HID descriptors of interface 2 and
 	 * subsequently call to the hid/hid-core to parse the fetched
