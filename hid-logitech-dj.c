@@ -430,11 +430,11 @@ static void delayedwork_callback(struct work_struct *work)
 
 	spin_unlock_irqrestore(&djrcv_dev->lock, flags);
 
-	/* enable hid++ wireless notifications */
-	hidpp_enable_notifications(djrcv_dev->hidpp_dev, true, true);
-
 	switch (dj_report.report_type) {
 	case REPORT_TYPE_NOTIF_DEVICE_PAIRED:
+		/* enable hid++ wireless notifications */
+		hidpp_enable_notifications(djrcv_dev->hidpp_dev, true, true);
+
 		logi_dj_recv_add_djhid_device(djrcv_dev, &dj_report);
 		break;
 	case REPORT_TYPE_NOTIF_DEVICE_UNPAIRED:
@@ -518,18 +518,18 @@ static void logi_dj_recv_forward_report(struct dj_receiver_dev *djrcv_dev,
 }
 
 static void logi_dj_recv_forward_raw_report(struct dj_receiver_dev *djrcv_dev,
-			struct dj_report *dj_report,
-			struct hid_report *report, u8 * data, int size)
+			u8 * data, int size)
 {
 	/* We are called from atomic context (tasklet && djrcv->lock held) */
 
 	struct dj_device *dj_dev = NULL;
+	u8 device_index = data[1];
 
-	if ((dj_report->device_index < DJ_DEVICE_INDEX_MIN) ||
-	    (dj_report->device_index > DJ_DEVICE_INDEX_MAX))
+	if ((device_index < DJ_DEVICE_INDEX_MIN) ||
+	    (device_index > DJ_DEVICE_INDEX_MAX))
 		return;
 
-	dj_dev = djrcv_dev->paired_dj_devices[dj_report->device_index];
+	dj_dev = djrcv_dev->paired_dj_devices[device_index];
 
 	if (!dj_dev)
 		return;
@@ -833,7 +833,7 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 	 */
 
 	spin_lock_irqsave(&djrcv_dev->lock, flags);
-	switch (dj_report->report_id) {
+	switch (data[0]) {
 	case REPORT_ID_DJ_SHORT:
 		switch (dj_report->report_type) {
 		case REPORT_TYPE_NOTIF_DEVICE_PAIRED:
@@ -855,8 +855,7 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 		/* intentional fallthrough */
 	case REPORT_ID_HIDPP_LONG:
 		if (!hidpp_raw_event(djrcv_dev->hidpp_dev, data, size))
-			logi_dj_recv_forward_raw_report(djrcv_dev, dj_report,
-							report, data, size);
+			logi_dj_recv_forward_raw_report(djrcv_dev, data, size);
 		break;
 	}
 	spin_unlock_irqrestore(&djrcv_dev->lock, flags);

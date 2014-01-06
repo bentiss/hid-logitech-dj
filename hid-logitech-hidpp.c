@@ -36,10 +36,6 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Benjamin Tissoires <benjamin.tissoires@gmail.com>");
 MODULE_AUTHOR("Nestor Lopez Casado <nlopezcasad@logitech.com>");
 
-struct hidpp_delayed_work_type {
-	bool connected;
-};
-
 static int __hidpp_send_report(struct hid_device *hdev,
 				struct hidpp_report *hidpp_report)
 {
@@ -59,7 +55,7 @@ static int __hidpp_send_report(struct hid_device *hdev,
 	}
 
 	/*
-	 * set the device_index as the receiver, it will be overwrited by
+	 * set the device_index as the receiver, it will be overwritten by
 	 * hid_hw_request if needed
 	 */
 	hidpp_report->device_index = 0xff;
@@ -102,7 +98,7 @@ static int hidpp_send_message_sync(struct hidpp_device *hidpp_dev,
 	}
 
 	if (!wait_event_timeout(hidpp_dev->wait, hidpp_dev->answer_available,
-				10*HZ)) {
+				5*HZ)) {
 		dbg_hid("%s:timeout waiting for response\n", __func__);
 		memset(response, 0, sizeof(struct hidpp_report));
 		ret = -ETIMEDOUT;
@@ -127,7 +123,7 @@ int hidpp_send_fap_command_sync(struct hidpp_device *hidpp_dev,
 {
 	struct hidpp_report message;
 
-	if (param_count > sizeof(message.rap.params))
+	if (param_count > sizeof(message.fap.params))
 		return -EINVAL;
 
 	memset(&message, 0, sizeof(message));
@@ -166,10 +162,7 @@ EXPORT_SYMBOL_GPL(hidpp_send_rap_command_sync);
 static void schedule_delayed_hidpp_connect(struct hidpp_device *hidpp_dev,
 		bool connected)
 {
-	struct hidpp_delayed_work_type work_type = {connected};
-
-	kfifo_in(&hidpp_dev->delayed_work_fifo, &work_type,
-				sizeof(struct hidpp_delayed_work_type));
+	kfifo_in(&hidpp_dev->delayed_work_fifo, &connected, sizeof(bool));
 
 	if (schedule_work(&hidpp_dev->work) == 0) {
 		dbg_hid("%s: did not schedule the work item, was already queued\n",
@@ -183,33 +176,35 @@ static void delayed_work_cb(struct work_struct *work)
 							work);
 	unsigned long flags;
 	int count;
-	struct hidpp_delayed_work_type work_type;
+	bool connected;
 
 	spin_lock_irqsave(&hidpp_dev->delayed_work_lock, flags);
 
-	count = kfifo_out(&hidpp_dev->delayed_work_fifo, &work_type,
-				sizeof(struct hidpp_delayed_work_type));
+	count = kfifo_out(&hidpp_dev->delayed_work_fifo,
+			  &connected, sizeof(bool));
 
-	if (count != sizeof(struct hidpp_delayed_work_type)) {
-		dev_err(&hidpp_dev->hid_dev->dev, "%s: workitem triggered without "
-			"notifications available\n", __func__);
+	if (count != sizeof(bool)) {
+		dev_err(&hidpp_dev->hid_dev->dev,
+			"%s: workitem triggered without notifications available\n",
+			__func__);
 		spin_unlock_irqrestore(&hidpp_dev->delayed_work_lock, flags);
 		return;
 	}
 
 	if (!kfifo_is_empty(&hidpp_dev->delayed_work_fifo)) {
 		if (schedule_work(&hidpp_dev->work) == 0)
-			dbg_hid("%s: did not schedule the work item, was "
-				"already queued\n", __func__);
+			dbg_hid("%s: did not schedule the work item, was already queued\n",
+				__func__);
 	}
 
 	spin_unlock_irqrestore(&hidpp_dev->delayed_work_lock, flags);
 
-	hidpp_dev->device_connect(hidpp_dev, work_type.connected);
+	hidpp_dev->device_connect(hidpp_dev, connected);
 }
 
 static int hidpp_init(struct hidpp_device *hidpp_dev, struct hid_device *hid_dev)
 {
+	int ret;
 	hidpp_dev->hid_dev = hid_dev;
 
 	INIT_WORK(&hidpp_dev->work, delayed_work_cb);
@@ -217,13 +212,14 @@ static int hidpp_init(struct hidpp_device *hidpp_dev, struct hid_device *hid_dev
 	init_waitqueue_head(&hidpp_dev->wait);
 
 	spin_lock_init(&hidpp_dev->delayed_work_lock);
-	if (kfifo_alloc(&hidpp_dev->delayed_work_fifo,
+	ret = kfifo_alloc(&hidpp_dev->delayed_work_fifo,
 			4 * sizeof(struct hidpp_report),
-			GFP_KERNEL)) {
+			GFP_KERNEL);
+	if (ret) {
 		dev_err(&hidpp_dev->hid_dev->dev,
 			"%s:failed allocating delayed_work_fifo\n", __func__);
 		mutex_destroy(&hidpp_dev->send_mutex);
-		return -ENOMEM;
+		return ret;
 	}
 
 	return 0;
@@ -261,18 +257,12 @@ struct hidpp_devres {
 	struct hidpp_device *hidpp_dev;
 };
 
-static int devm_hidpp_device_match(struct device *dev, void *res, void *data)
-{
-	struct hidpp_devres *devres = res;
-
-	return devres->hidpp_dev == data;
-}
-
 static void devm_hidpp_device_release(struct device *dev, void *res)
 {
 	struct hidpp_devres *devres = res;
 
 	hidpp_remove(devres->hidpp_dev);
+	kfree(devres->hidpp_dev);
 }
 
 struct hidpp_device *devm_hidpp_allocate(struct hid_device *hdev)
@@ -291,7 +281,6 @@ struct hidpp_device *devm_hidpp_allocate(struct hid_device *hdev)
 		devres_free(devres);
 		return NULL;
 	}
-	hidpp_dev->devres_managed = true;
 
 	devres->hidpp_dev = hidpp_dev;
 	devres_add(&hdev->dev, devres);
@@ -299,17 +288,6 @@ struct hidpp_device *devm_hidpp_allocate(struct hid_device *hdev)
 	return hidpp_dev;
 }
 EXPORT_SYMBOL_GPL(devm_hidpp_allocate);
-
-void hidpp_free(struct hidpp_device *hidpp_dev)
-{
-	hidpp_remove(hidpp_dev);
-	if (hidpp_dev->devres_managed)
-		WARN_ON(devres_destroy(&hidpp_dev->hid_dev->dev,
-					devm_hidpp_device_release,
-					devm_hidpp_device_match,
-					hidpp_dev));
-}
-EXPORT_SYMBOL_GPL(hidpp_free);
 
 static inline bool hidpp_match_answer(struct hidpp_report *question,
 		struct hidpp_report *answer)
@@ -421,7 +399,6 @@ int hidpp_enable_notifications(struct hidpp_device *hidpp_dev,
 					HIDPP_SET_REGISTER,
 					HIDPP_REG_ENABLE_HIDPP_NOTIFICATIONS,
 					params, 3, &response);
-
 }
 EXPORT_SYMBOL_GPL(hidpp_enable_notifications);
 
@@ -474,7 +451,7 @@ int hidpp_root_get_feature(struct hidpp_device *hidpp_dev, u16 feature,
 			CMD_ROOT_GET_FEATURE,
 			params, 2, &response);
 	if (ret)
-		return -ret;
+		return ret;
 
 	*feature_index = response.fap.params[0];
 	*feature_type = response.fap.params[1];
@@ -517,7 +494,7 @@ int hidpp_root_get_protocol_version(struct hidpp_device *hidpp_dev,
 #define CMD_GET_DEVICE_NAME_TYPE_GET_DEVICE_NAME	0x11
 #define CMD_GET_DEVICE_NAME_TYPE_GET_TYPE		0x21
 
-int hidpp_get_device_name_type_get_count(struct hidpp_device *hidpp_dev,
+static int hidpp_devicenametype_get_count(struct hidpp_device *hidpp_dev,
 	u8 feature_index, u8 *nameLength)
 {
 	struct hidpp_report response;
@@ -532,9 +509,8 @@ int hidpp_get_device_name_type_get_count(struct hidpp_device *hidpp_dev,
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(hidpp_get_device_name_type_get_count);
 
-int hidpp_get_device_name_type_get_device_name(struct hidpp_device *hidpp_dev,
+static int hidpp_devicenametype_get_device_name(struct hidpp_device *hidpp_dev,
 	u8 feature_index, u8 char_index, char *device_name, int len_buf)
 {
 	struct hidpp_report response;
@@ -560,24 +536,6 @@ int hidpp_get_device_name_type_get_device_name(struct hidpp_device *hidpp_dev,
 
 	return count;
 }
-EXPORT_SYMBOL_GPL(hidpp_get_device_name_type_get_device_name);
-
-int hidpp_get_device_name_type_get_type(struct hidpp_device *hidpp_dev,
-	u8 feature_index, u8 *device_type)
-{
-	struct hidpp_report response;
-	int ret;
-	ret = hidpp_send_fap_command_sync(hidpp_dev, feature_index,
-		CMD_GET_DEVICE_NAME_TYPE_GET_TYPE, NULL, 0, &response);
-
-	if (ret)
-		return -ret;
-
-	*device_type = response.fap.params[0];
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(hidpp_get_device_name_type_get_type);
 
 char *hidpp_get_device_name(struct hidpp_device *hidpp_dev, u8 *name_length)
 {
@@ -586,21 +544,33 @@ char *hidpp_get_device_name(struct hidpp_device *hidpp_dev, u8 *name_length)
 	u8 __name_length;
 	char *name;
 	unsigned index = 0;
+	int ret;
 
-	hidpp_root_get_feature(hidpp_dev, HIDPP_PAGE_GET_DEVICE_NAME_TYPE,
+	ret = hidpp_root_get_feature(hidpp_dev, HIDPP_PAGE_GET_DEVICE_NAME_TYPE,
 		&feature_index, &feature_type);
+	if (ret)
+		goto out_err;
 
-	hidpp_get_device_name_type_get_count(hidpp_dev, feature_index, &__name_length);
+	ret = hidpp_devicenametype_get_count(hidpp_dev, feature_index,
+		&__name_length);
+	if (ret)
+		goto out_err;
+
 	name = kzalloc(__name_length + 1, GFP_KERNEL);
 	if (!name)
-		return NULL;
+		goto out_err;
 
 	*name_length = __name_length + 1;
 	while (index < __name_length)
-		index += hidpp_get_device_name_type_get_device_name(hidpp_dev,
-			feature_index, index, name + index, __name_length - index);
+		index += hidpp_devicenametype_get_device_name(hidpp_dev,
+			feature_index, index, name + index,
+			__name_length - index);
 
 	return name;
+
+out_err:
+	*name_length = 0;
+	return NULL;
 }
 EXPORT_SYMBOL_GPL(hidpp_get_device_name);
 
@@ -636,25 +606,6 @@ int hidpp_touchpad_get_raw_info(struct hidpp_device *hidpp_dev,
 	return ret;
 }
 EXPORT_SYMBOL_GPL(hidpp_touchpad_get_raw_info);
-
-//int hidpp_touchpad_get_raw_report_state(struct hidpp_device *hidpp_dev,
-//	bool *send_raw_reports, bool *force_vs_area,
-//	bool *sensor_enhanced_settings)
-//{
-//	struct __hidpp_report response;
-//	int ret;
-//	ret = hidpp_send_report_with_feature(hidpp_dev,
-//		HIDPP_PAGE_TOUCHPAD_RAW_XY,
-//		CMD_TOUCHPAD_GET_RAW_REPORT_STATE, NULL, 0, &response);
-//
-//	if (ret)
-//		return -ret;
-//
-///** TODO */
-//
-//	return ret;
-//}
-//EXPORT_SYMBOL_GPL(hidpp_touchpad_get_raw_report_state);
 
 int hidpp_touchpad_set_raw_report_state(struct hidpp_device *hidpp_dev,
 		u8 feature_index, bool send_raw_reports, bool force_vs_area,

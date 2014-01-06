@@ -37,7 +37,6 @@
 
 #define REPORT_ID_HIDPP_SHORT			0x10
 #define REPORT_ID_HIDPP_LONG			0x11
-#define REPORT_ID_HIDPP_REL			0x20
 
 #define HIDPP_REPORT_SHORT_LENGTH		7
 #define HIDPP_REPORT_LONG_LENGTH		20
@@ -87,12 +86,12 @@ struct hidpp_report {
 } __packed;
 
 struct hidpp_device {
-	struct hid_device *hid_dev;
 	void *driver_data;
 
 	void (*device_connect)(struct hidpp_device *hidpp_dev, bool connected);
 
 	/* private */
+	struct hid_device *hid_dev;
 	struct work_struct work;
 	struct mutex send_mutex;
 	struct kfifo delayed_work_fifo;
@@ -100,8 +99,12 @@ struct hidpp_device {
 	void *send_receive_buf;
 	wait_queue_head_t wait;
 	bool answer_available;
-	bool devres_managed;
 };
+
+static inline struct hid_device *hidpp_get_hiddev(struct hidpp_device *hidpp)
+{
+	return hidpp->hid_dev;
+}
 
 static inline void *hidpp_get_drvdata(struct hidpp_device *hidpp_dev)
 {
@@ -167,14 +170,8 @@ extern int hidpp_root_get_protocol_version(struct hidpp_device *hidpp_dev,
 
 #define HIDPP_PAGE_GET_DEVICE_NAME_TYPE			0x0005
 
-extern int hidpp_get_device_name_type_get_count(struct hidpp_device *hidpp_dev,
-	u8 feature_index, u8 *nameLength);
-extern int hidpp_get_device_name_type_get_device_name(struct hidpp_device *hidpp_dev,
-	u8 feature_index, u8 char_index, char *device_name, int len_buf);
-extern int hidpp_get_device_name_type_get_type(struct hidpp_device *hidpp_dev,
-	u8 feature_index, u8 *device_type);
-
-extern char *hidpp_get_device_name(struct hidpp_device *hidpp_dev, u8 *name_length);
+extern char *hidpp_get_device_name(struct hidpp_device *hidpp_dev,
+	u8 *name_length);
 
 /* -------------------------------------------------------------------------- */
 /* 0x6100: TouchPadRawXY                                                      */
@@ -216,10 +213,6 @@ struct hidpp_touchpad_raw_xy {
 
 extern int hidpp_touchpad_get_raw_info(struct hidpp_device *hidpp_dev,
 	u8 feature_index, struct hidpp_touchpad_raw_info *raw_info);
-
-//extern int hidpp_touchpad_get_raw_report_state(struct hidpp_device *hidpp_dev,
-//	u8 feature_index, bool *send_raw_reports, bool *force_vs_area,
-//	bool *sensor_enhanced_settings);
 
 extern int hidpp_touchpad_set_raw_report_state(struct hidpp_device *hidpp_dev,
 		u8 feature_index, bool send_raw_reports, bool force_vs_area,

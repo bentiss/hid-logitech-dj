@@ -52,7 +52,7 @@ struct wtp_data {
 
 static int wtp_create_input(struct hidpp_device *hidpp_dev)
 {
-	struct hid_device *hdev = hidpp_dev->hid_dev;
+	struct hid_device *hdev = hidpp_get_hiddev(hidpp_dev);
 	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
 	struct input_dev *input_dev = devm_input_allocate_device(&hdev->dev);
 
@@ -64,9 +64,9 @@ static int wtp_create_input(struct hidpp_device *hidpp_dev)
 	input_dev->name = wd->name;
 	input_dev->phys = hdev->phys;
 	input_dev->uniq = hdev->uniq;
-	input_dev->id.bustype = hidpp_dev->hid_dev->bus;
-	input_dev->id.vendor  = hidpp_dev->hid_dev->vendor;
-	input_dev->id.product = hidpp_dev->hid_dev->product;
+	input_dev->id.bustype = hdev->bus;
+	input_dev->id.vendor  = hdev->vendor;
+	input_dev->id.product = hdev->product;
 	input_dev->id.version = 0;
 
 	__set_bit(BTN_TOUCH, input_dev->keybit);
@@ -187,6 +187,7 @@ static int wtp_init(struct hidpp_device *hidpp_dev)
 {
 	struct hidpp_touchpad_raw_info raw_info;
 	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
+	struct hid_device *hdev = hidpp_get_hiddev(hidpp_dev);
 	u8 name_length;
 	u8 feature_type;
 	char *name;
@@ -202,8 +203,7 @@ static int wtp_init(struct hidpp_device *hidpp_dev)
 
 	name = hidpp_get_device_name(hidpp_dev, &name_length);
 	if (name) {
-		wd->name = devm_kzalloc(&hidpp_dev->hid_dev->dev,
-					name_length, GFP_KERNEL);
+		wd->name = devm_kzalloc(&hdev->dev, name_length, GFP_KERNEL);
 		if (wd->name)
 			memcpy(wd->name, name, name_length);
 		kfree(name);
