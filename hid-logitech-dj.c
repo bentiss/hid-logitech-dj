@@ -254,6 +254,7 @@ static struct hid_ll_driver logi_dj_ll_driver;
 static int logi_dj_output_hidraw_report(struct hid_device *hid, u8 * buf,
 					size_t count,
 					unsigned char report_type);
+static int logi_dj_recv_query_paired_devices(struct dj_receiver_dev *djrcv_dev);
 
 static void logi_dj_recv_destroy_djhid_device(struct dj_receiver_dev *djrcv_dev,
 						struct dj_report *dj_report)
@@ -310,6 +311,7 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	if (dj_report->report_params[DEVICE_PAIRED_PARAM_SPFUNCTION] &
 	    SPFUNCTION_DEVICE_LIST_EMPTY) {
 		dbg_hid("%s: device list is empty\n", __func__);
+		djrcv_dev->querying_devices = false;
 		return;
 	}
 
@@ -406,6 +408,7 @@ static void delayedwork_callback(struct work_struct *work)
 	struct dj_report dj_report;
 	unsigned long flags;
 	int count;
+	int retval;
 
 	dbg_hid("%s\n", __func__);
 
@@ -441,6 +444,25 @@ static void delayedwork_callback(struct work_struct *work)
 		logi_dj_recv_destroy_djhid_device(djrcv_dev, &dj_report);
 		break;
 	default:
+	/* A normal report (i. e. not belonging to a pair/unpair notification)
+	 * arriving here, means that the report arrived but we did not have a
+	 * paired dj_device associated to the report's device_index, this
+	 * means that the original "device paired" notification corresponding
+	 * to this dj_device never arrived to this driver. The reason is that
+	 * hid-core discards all packets coming from a device while probe() is
+	 * executing. */
+	if (!djrcv_dev->paired_dj_devices[dj_report.device_index]) {
+		/* ok, we don't know the device, just re-ask the
+		 * receiver for the list of connected devices. */
+		retval = logi_dj_recv_query_paired_devices(djrcv_dev);
+		if (!retval) {
+			/* everything went fine, so just leave */
+			break;
+		}
+		dev_err(&djrcv_dev->hdev->dev,
+			"%s:logi_dj_recv_query_paired_devices "
+			"error:%d\n", __func__, retval);
+		}
 		dbg_hid("%s: unexpected report type\n", __func__);
 	}
 }
@@ -471,6 +493,12 @@ static void logi_dj_recv_forward_null_report(struct dj_receiver_dev *djrcv_dev,
 	if (!djdev) {
 		dbg_hid("djrcv_dev->paired_dj_devices[dj_report->device_index]"
 			" is NULL, index %d\n", dj_report->device_index);
+		kfifo_in(&djrcv_dev->notif_fifo, dj_report, sizeof(struct dj_report));
+
+		if (schedule_work(&djrcv_dev->work) == 0) {
+			dbg_hid("%s: did not schedule the work item, was already "
+			"queued\n", __func__);
+		}
 		return;
 	}
 
@@ -501,6 +529,12 @@ static void logi_dj_recv_forward_report(struct dj_receiver_dev *djrcv_dev,
 	if (dj_device == NULL) {
 		dbg_hid("djrcv_dev->paired_dj_devices[dj_report->device_index]"
 			" is NULL, index %d\n", dj_report->device_index);
+		kfifo_in(&djrcv_dev->notif_fifo, dj_report, sizeof(struct dj_report));
+
+		if (schedule_work(&djrcv_dev->work) == 0) {
+			dbg_hid("%s: did not schedule the work item, was already "
+			"queued\n", __func__);
+		}
 		return;
 	}
 
@@ -517,7 +551,7 @@ static void logi_dj_recv_forward_report(struct dj_receiver_dev *djrcv_dev,
 	}
 }
 
-static void logi_dj_recv_forward_raw_report(struct dj_receiver_dev *djrcv_dev,
+static void logi_dj_recv_forward_hidpp(struct dj_receiver_dev *djrcv_dev,
 			u8 * data, int size)
 {
 	/* We are called from atomic context (tasklet && djrcv->lock held) */
@@ -567,6 +601,10 @@ static int logi_dj_recv_query_paired_devices(struct dj_receiver_dev *djrcv_dev)
 	struct dj_report *dj_report;
 	int retval;
 
+	/* no need to protect djrcv_dev->querying_devices */
+	if (djrcv_dev->querying_devices)
+		return 0;
+
 	dj_report = kzalloc(sizeof(struct dj_report), GFP_KERNEL);
 	if (!dj_report)
 		return -ENOMEM;
@@ -577,6 +615,7 @@ static int logi_dj_recv_query_paired_devices(struct dj_receiver_dev *djrcv_dev)
 	kfree(dj_report);
 	return retval;
 }
+
 
 static int logi_dj_recv_switch_to_dj_mode(struct dj_receiver_dev *djrcv_dev,
 					  unsigned timeout)
@@ -622,26 +661,8 @@ static int logi_dj_output_hidraw_report(struct hid_device *hid, u8 * buf,
 					size_t count,
 					unsigned char report_type)
 {
-	struct dj_device *djdev = hid->driver_data;
-	struct dj_receiver_dev *djrcv_dev = djdev->dj_receiver_dev;
-	struct hid_report* report;
-	struct hid_report_enum *output_report_enum;
-	int i;
-
 	/* Called by hid raw to send data */
 	dbg_hid("%s\n", __func__);
-
-	if (buf[0] != REPORT_ID_HIDPP_SHORT &&
-	    buf[0] != REPORT_ID_HIDPP_LONG)
-		return -1;
-
-	output_report_enum = &djrcv_dev->hdev->report_enum[HID_OUTPUT_REPORT];
-	report = output_report_enum->report_id_hash[buf[0]];
-
-	for (i = 2; i < HIDPP_REPORT_LONG_LENGTH - 1; i++)
-		hid_set_field(report->field[0], i-1, buf[i]);
-
-	hid_hw_request(djrcv_dev->hdev, report, HID_REQ_SET_REPORT);
 
 	return 0;
 }
@@ -651,6 +672,11 @@ static void logi_dj_ll_request(struct hid_device *hid, struct hid_report *rep,
 {
 	struct dj_device *djdev = hid->driver_data;
 	struct dj_receiver_dev *djrcv_dev = djdev->dj_receiver_dev;
+
+	if ((rep->id != REPORT_ID_HIDPP_LONG) &&
+	    (rep->id != REPORT_ID_HIDPP_SHORT))
+		/* prevent forwarding of non acceptable reports */
+		return;
 
 	hid_set_field(rep->field[0], 0, djdev->device_index);
 
@@ -808,12 +834,12 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 
 	dbg_hid("%s, size:%d\n", __func__, size);
 
-	/* Here we receive all data coming from iface 2, there are 4 cases:
+	/* Here we receive all data coming from iface 2, there are 5 cases:
 	 *
 	 * 1) Data should continue its normal processing i.e. data does not
-	 * come from the DJ collection, in which case we do nothing and
-	 * return 0, so hid-core can continue normal processing (will forward
-	 * to associated hidraw device)
+	 * come from the DJ or the HID++ collection, in which case we do nothing
+	 * and return 0, so hid-core can continue normal processing (will
+	 * forward to associated hidraw device)
 	 *
 	 * 2) Data is from DJ collection, and is intended for this driver i. e.
 	 * data contains arrival, departure, etc notifications, in which case
@@ -830,6 +856,12 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 	 * a paired DJ device in which case we forward it to the correct hid
 	 * device (via hid_input_report() ) and return 1 so hid-core does not do
 	 * anything else with it.
+	 *
+	 * 5) Data is from the HID++ collection, in this case, we forward the
+	 * data to the corresponding child dj device and return 0 to hid-core
+	 * so he data also goes to the hidraw device of the receiver. This
+	 * allows a user space application to implement the full HID++ routing
+	 * via the receiver.
 	 */
 
 	spin_lock_irqsave(&djrcv_dev->lock, flags);
@@ -855,7 +887,7 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 		/* intentional fallthrough */
 	case REPORT_ID_HIDPP_LONG:
 		if (!hidpp_raw_event(djrcv_dev->hidpp_dev, data, size))
-			logi_dj_recv_forward_raw_report(djrcv_dev, data, size);
+			logi_dj_recv_forward_hidpp(djrcv_dev, data, size);
 		break;
 	}
 	spin_unlock_irqrestore(&djrcv_dev->lock, flags);
@@ -884,8 +916,7 @@ static int logi_dj_probe(struct hid_device *hdev,
 
 	/* Treat interface 2 */
 
-	djrcv_dev = devm_kzalloc(&hdev->dev, sizeof(struct dj_receiver_dev),
-				GFP_KERNEL);
+	djrcv_dev = kzalloc(sizeof(struct dj_receiver_dev), GFP_KERNEL);
 	if (!djrcv_dev) {
 		dev_err(&hdev->dev,
 			"%s:failed allocating dj_receiver_dev\n", __func__);
@@ -899,6 +930,7 @@ static int logi_dj_probe(struct hid_device *hdev,
 			GFP_KERNEL)) {
 		dev_err(&hdev->dev,
 			"%s:failed allocating notif_fifo\n", __func__);
+		kfree(djrcv_dev);
 		return -ENOMEM;
 	}
 	hid_set_drvdata(hdev, djrcv_dev);
@@ -974,6 +1006,7 @@ hid_hw_start_fail:
 hid_parse_fail:
 hidpp_fail:
 	kfifo_free(&djrcv_dev->notif_fifo);
+	kfree(djrcv_dev);
 	hid_set_drvdata(hdev, NULL);
 	return retval;
 
@@ -1024,6 +1057,7 @@ static void logi_dj_remove(struct hid_device *hdev)
 	}
 
 	kfifo_free(&djrcv_dev->notif_fifo);
+	kfree(djrcv_dev);
 	hid_set_drvdata(hdev, NULL);
 }
 
