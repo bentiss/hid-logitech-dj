@@ -152,6 +152,57 @@ static const char media_descriptor[] = {
 	0xc0,			/* EndCollection                       */
 };				/*                                     */
 
+/* HIDPP descriptor */
+static const char hidpp_descriptor[] = {
+	0x06, 0x00, 0xff,	/* Usage Page (Vendor Defined Page 1)  */
+	0x09, 0x01,		/* Usage (Vendor Usage 1)              */
+	0xa1, 0x01,		/* Collection (Application)            */
+	0x85, 0x10,		/*   Report ID (16)                    */
+	0x75, 0x08,		/*   Report Size (8)                   */
+	0x95, 0x06,		/*   Report Count (6)                  */
+	0x15, 0x00,		/*   Logical Minimum (0)               */
+	0x26, 0xff, 0x00,	/*   Logical Maximum (255)             */
+	0x09, 0x01,		/*   Usage (Vendor Usage 1)            */
+	0x81, 0x00,		/*   Input (Data,Arr,Abs)              */
+	0x09, 0x01,		/*   Usage (Vendor Usage 1)            */
+	0x91, 0x00,		/*   Output (Data,Arr,Abs)             */
+	0xc0,			/* End Collection                      */
+	0x06, 0x00, 0xff,	/* Usage Page (Vendor Defined Page 1)  */
+	0x09, 0x02,		/* Usage (Vendor Usage 2)              */
+	0xa1, 0x01,		/* Collection (Application)            */
+	0x85, 0x11,		/*   Report ID (17)                    */
+	0x75, 0x08,		/*   Report Size (8)                   */
+	0x95, 0x13,		/*   Report Count (19)                 */
+	0x15, 0x00,		/*   Logical Minimum (0)               */
+	0x26, 0xff, 0x00,	/*   Logical Maximum (255)             */
+	0x09, 0x02,		/*   Usage (Vendor Usage 2)            */
+	0x81, 0x00,		/*   Input (Data,Arr,Abs)              */
+	0x09, 0x02,		/*   Usage (Vendor Usage 2)            */
+	0x91, 0x00,		/*   Output (Data,Arr,Abs)             */
+	0xc0,			/* End Collection                      */
+	0x06, 0x00, 0xff,	/* Usage Page (Vendor Defined Page 1)  */
+	0x09, 0x04,		/* Usage (Vendor Usage 0x04)           */
+	0xa1, 0x01,		/* Collection (Application)            */
+	0x85, 0x20,		/*   Report ID (32)                    */
+	0x75, 0x08,		/*   Report Size (8)                   */
+	0x95, 0x0e,		/*   Report Count (14)                 */
+	0x15, 0x00,		/*   Logical Minimum (0)               */
+	0x26, 0xff, 0x00,	/*   Logical Maximum (255)             */
+	0x09, 0x41,		/*   Usage (Vendor Usage 0x41)         */
+	0x81, 0x00,		/*   Input (Data,Arr,Abs)              */
+	0x09, 0x41,		/*   Usage (Vendor Usage 0x41)         */
+	0x91, 0x00,		/*   Output (Data,Arr,Abs)             */
+	0x85, 0x21,		/*   Report ID (33)                    */
+	0x95, 0x1f,		/*   Report Count (31)                 */
+	0x15, 0x00,		/*   Logical Minimum (0)               */
+	0x26, 0xff, 0x00,	/*   Logical Maximum (255)             */
+	0x09, 0x42,		/*   Usage (Vendor Usage 0x42)         */
+	0x81, 0x00,		/*   Input (Data,Arr,Abs)              */
+	0x09, 0x42,		/*   Usage (Vendor Usage 0x42)         */
+	0x91, 0x00,		/*   Output (Data,Arr,Abs)             */
+	0xc0,			/* End Collection                      */
+};
+
 /* Maximum size of all defined hid reports in bytes (including report id) */
 #define MAX_REPORT_SIZE 8
 
@@ -161,7 +212,8 @@ static const char media_descriptor[] = {
 	 sizeof(mse_descriptor) +		\
 	 sizeof(consumer_descriptor) +		\
 	 sizeof(syscontrol_descriptor) +	\
-	 sizeof(media_descriptor))
+	 sizeof(media_descriptor) +	\
+	 sizeof(hidpp_descriptor))
 
 /* Number of possible hid report types that can be created by this driver.
  *
@@ -192,6 +244,7 @@ static struct hid_ll_driver logi_dj_ll_driver;
 static int logi_dj_output_hidraw_report(struct hid_device *hid, u8 * buf,
 					size_t count,
 					unsigned char report_type);
+static int logi_dj_recv_query_paired_devices(struct dj_receiver_dev *djrcv_dev);
 
 static void logi_dj_recv_destroy_djhid_device(struct dj_receiver_dev *djrcv_dev,
 						struct dj_report *dj_report)
@@ -232,6 +285,7 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	if (dj_report->report_params[DEVICE_PAIRED_PARAM_SPFUNCTION] &
 	    SPFUNCTION_DEVICE_LIST_EMPTY) {
 		dbg_hid("%s: device list is empty\n", __func__);
+		djrcv_dev->querying_devices = false;
 		return;
 	}
 
@@ -239,6 +293,12 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	    (dj_report->device_index > DJ_DEVICE_INDEX_MAX)) {
 		dev_err(&djrcv_hdev->dev, "%s: invalid device index:%d\n",
 			__func__, dj_report->device_index);
+		return;
+	}
+
+	if (djrcv_dev->paired_dj_devices[dj_report->device_index]) {
+		/* The device is already known. No need to reallocate it. */
+		dbg_hid("%s: device is already known\n", __func__);
 		return;
 	}
 
@@ -255,11 +315,15 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	dj_hiddev->dev.parent = &djrcv_hdev->dev;
 	dj_hiddev->bus = BUS_USB;
 	dj_hiddev->vendor = le16_to_cpu(usbdev->descriptor.idVendor);
-	dj_hiddev->product = le16_to_cpu(usbdev->descriptor.idProduct);
+	dj_hiddev->product =
+	    (dj_report->report_params[DEVICE_PAIRED_PARAM_EQUAD_ID_MSB] << 8) |
+	     dj_report->report_params[DEVICE_PAIRED_PARAM_EQUAD_ID_LSB];
 	snprintf(dj_hiddev->name, sizeof(dj_hiddev->name),
-		"Logitech Unifying Device. Wireless PID:%02x%02x",
-		dj_report->report_params[DEVICE_PAIRED_PARAM_EQUAD_ID_MSB],
-		dj_report->report_params[DEVICE_PAIRED_PARAM_EQUAD_ID_LSB]);
+		"Logitech Unifying Device. Wireless PID:%04x",
+		dj_hiddev->product);
+
+	dj_hiddev->group = HID_GROUP_LOGITECH_DJ_DEVICE_GENERIC;
+	dj_hiddev->product = le16_to_cpu(usbdev->descriptor.idProduct);
 
 	usb_make_path(usbdev, dj_hiddev->phys, sizeof(dj_hiddev->phys));
 	snprintf(tmpstr, sizeof(tmpstr), ":%d", dj_report->device_index);
@@ -305,6 +369,7 @@ static void delayedwork_callback(struct work_struct *work)
 	struct dj_report dj_report;
 	unsigned long flags;
 	int count;
+	int retval;
 
 	dbg_hid("%s\n", __func__);
 
@@ -337,6 +402,25 @@ static void delayedwork_callback(struct work_struct *work)
 		logi_dj_recv_destroy_djhid_device(djrcv_dev, &dj_report);
 		break;
 	default:
+	/* A normal report (i. e. not belonging to a pair/unpair notification)
+	 * arriving here, means that the report arrived but we did not have a
+	 * paired dj_device associated to the report's device_index, this
+	 * means that the original "device paired" notification corresponding
+	 * to this dj_device never arrived to this driver. The reason is that
+	 * hid-core discards all packets coming from a device while probe() is
+	 * executing. */
+	if (!djrcv_dev->paired_dj_devices[dj_report.device_index]) {
+		/* ok, we don't know the device, just re-ask the
+		 * receiver for the list of connected devices. */
+		retval = logi_dj_recv_query_paired_devices(djrcv_dev);
+		if (!retval) {
+			/* everything went fine, so just leave */
+			break;
+		}
+		dev_err(&djrcv_dev->hdev->dev,
+			"%s:logi_dj_recv_query_paired_devices "
+			"error:%d\n", __func__, retval);
+		}
 		dbg_hid("%s: unexpected report type\n", __func__);
 	}
 }
@@ -367,6 +451,12 @@ static void logi_dj_recv_forward_null_report(struct dj_receiver_dev *djrcv_dev,
 	if (!djdev) {
 		dbg_hid("djrcv_dev->paired_dj_devices[dj_report->device_index]"
 			" is NULL, index %d\n", dj_report->device_index);
+		kfifo_in(&djrcv_dev->notif_fifo, dj_report, sizeof(struct dj_report));
+
+		if (schedule_work(&djrcv_dev->work) == 0) {
+			dbg_hid("%s: did not schedule the work item, was already "
+			"queued\n", __func__);
+		}
 		return;
 	}
 
@@ -397,6 +487,12 @@ static void logi_dj_recv_forward_report(struct dj_receiver_dev *djrcv_dev,
 	if (dj_device == NULL) {
 		dbg_hid("djrcv_dev->paired_dj_devices[dj_report->device_index]"
 			" is NULL, index %d\n", dj_report->device_index);
+		kfifo_in(&djrcv_dev->notif_fifo, dj_report, sizeof(struct dj_report));
+
+		if (schedule_work(&djrcv_dev->work) == 0) {
+			dbg_hid("%s: did not schedule the work item, was already "
+			"queued\n", __func__);
+		}
 		return;
 	}
 
@@ -413,6 +509,25 @@ static void logi_dj_recv_forward_report(struct dj_receiver_dev *djrcv_dev,
 	}
 }
 
+static void logi_dj_recv_forward_hidpp(struct dj_receiver_dev *djrcv_dev,
+			u8 *data, int size)
+{
+	/* We are called from atomic context (tasklet && djrcv->lock held) */
+
+	struct dj_device *dj_dev = NULL;
+	u8 device_index = data[1];
+
+	if ((device_index < DJ_DEVICE_INDEX_MIN) ||
+	    (device_index > DJ_DEVICE_INDEX_MAX))
+		return;
+
+	dj_dev = djrcv_dev->paired_dj_devices[device_index];
+
+	if (!dj_dev)
+		return;
+
+	hid_input_report(dj_dev->hdev, HID_INPUT_REPORT, data, size, 1);
+}
 
 static int logi_dj_recv_send_report(struct dj_receiver_dev *djrcv_dev,
 				    struct dj_report *dj_report)
@@ -444,6 +559,10 @@ static int logi_dj_recv_query_paired_devices(struct dj_receiver_dev *djrcv_dev)
 	struct dj_report *dj_report;
 	int retval;
 
+	/* no need to protect djrcv_dev->querying_devices */
+	if (djrcv_dev->querying_devices)
+		return 0;
+
 	dj_report = kzalloc(sizeof(struct dj_report), GFP_KERNEL);
 	if (!dj_report)
 		return -ENOMEM;
@@ -454,6 +573,7 @@ static int logi_dj_recv_query_paired_devices(struct dj_receiver_dev *djrcv_dev)
 	kfree(dj_report);
 	return retval;
 }
+
 
 static int logi_dj_recv_switch_to_dj_mode(struct dj_receiver_dev *djrcv_dev,
 					  unsigned timeout)
@@ -505,9 +625,25 @@ static int logi_dj_output_hidraw_report(struct hid_device *hid, u8 * buf,
 	return 0;
 }
 
-static void rdcat(char **rdesc, unsigned int *rsize, const char *data, unsigned int size)
+static void logi_dj_ll_request(struct hid_device *hid, struct hid_report *rep,
+		int reqtype)
 {
-	memcpy(*rdesc + *rsize, data, size);
+	struct dj_device *djdev = hid->driver_data;
+	struct dj_receiver_dev *djrcv_dev = djdev->dj_receiver_dev;
+
+	if ((rep->id != REPORT_ID_HIDPP_LONG) &&
+	    (rep->id != REPORT_ID_HIDPP_SHORT))
+		/* prevent forwarding of non acceptable reports */
+		return;
+
+	hid_set_field(rep->field[0], 0, djdev->device_index);
+
+	hid_hw_request(djrcv_dev->hdev, rep, reqtype);
+}
+
+static void rdcat(char *rdesc, unsigned int *rsize, const char *data, unsigned int size)
+{
+	memcpy(rdesc + *rsize, data, size);
 	*rsize += size;
 }
 
@@ -530,37 +666,39 @@ static int logi_dj_ll_parse(struct hid_device *hid)
 	if (djdev->reports_supported & STD_KEYBOARD) {
 		dbg_hid("%s: sending a kbd descriptor, reports_supported: %x\n",
 			__func__, djdev->reports_supported);
-		rdcat(&rdesc, &rsize, kbd_descriptor, sizeof(kbd_descriptor));
+		rdcat(rdesc, &rsize, kbd_descriptor, sizeof(kbd_descriptor));
 	}
 
 	if (djdev->reports_supported & STD_MOUSE) {
 		dbg_hid("%s: sending a mouse descriptor, reports_supported: "
 			"%x\n", __func__, djdev->reports_supported);
-		rdcat(&rdesc, &rsize, mse_descriptor, sizeof(mse_descriptor));
+		rdcat(rdesc, &rsize, mse_descriptor, sizeof(mse_descriptor));
 	}
 
 	if (djdev->reports_supported & MULTIMEDIA) {
 		dbg_hid("%s: sending a multimedia report descriptor: %x\n",
 			__func__, djdev->reports_supported);
-		rdcat(&rdesc, &rsize, consumer_descriptor, sizeof(consumer_descriptor));
+		rdcat(rdesc, &rsize, consumer_descriptor, sizeof(consumer_descriptor));
 	}
 
 	if (djdev->reports_supported & POWER_KEYS) {
 		dbg_hid("%s: sending a power keys report descriptor: %x\n",
 			__func__, djdev->reports_supported);
-		rdcat(&rdesc, &rsize, syscontrol_descriptor, sizeof(syscontrol_descriptor));
+		rdcat(rdesc, &rsize, syscontrol_descriptor, sizeof(syscontrol_descriptor));
 	}
 
 	if (djdev->reports_supported & MEDIA_CENTER) {
 		dbg_hid("%s: sending a media center report descriptor: %x\n",
 			__func__, djdev->reports_supported);
-		rdcat(&rdesc, &rsize, media_descriptor, sizeof(media_descriptor));
+		rdcat(rdesc, &rsize, media_descriptor, sizeof(media_descriptor));
 	}
 
 	if (djdev->reports_supported & KBD_LEDS) {
 		dbg_hid("%s: need to send kbd leds report descriptor: %x\n",
 			__func__, djdev->reports_supported);
 	}
+
+	rdcat(rdesc, &rsize, hidpp_descriptor, sizeof(hidpp_descriptor));
 
 	retval = hid_parse_report(hid, rdesc, rsize);
 	kfree(rdesc);
@@ -638,6 +776,7 @@ static struct hid_ll_driver logi_dj_ll_driver = {
 	.stop = logi_dj_ll_stop,
 	.open = logi_dj_ll_open,
 	.close = logi_dj_ll_close,
+	.request = logi_dj_ll_request,
 	.hidinput_input_event = logi_dj_ll_input_event,
 };
 
@@ -653,12 +792,12 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 
 	dbg_hid("%s, size:%d\n", __func__, size);
 
-	/* Here we receive all data coming from iface 2, there are 4 cases:
+	/* Here we receive all data coming from iface 2, there are 5 cases:
 	 *
 	 * 1) Data should continue its normal processing i.e. data does not
-	 * come from the DJ collection, in which case we do nothing and
-	 * return 0, so hid-core can continue normal processing (will forward
-	 * to associated hidraw device)
+	 * come from the DJ or the HID++ collection, in which case we do nothing
+	 * and return 0, so hid-core can continue normal processing (will
+	 * forward to associated hidraw device)
 	 *
 	 * 2) Data is from DJ collection, and is intended for this driver i. e.
 	 * data contains arrival, departure, etc notifications, in which case
@@ -675,10 +814,17 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 	 * a paired DJ device in which case we forward it to the correct hid
 	 * device (via hid_input_report() ) and return 1 so hid-core does not do
 	 * anything else with it.
+	 *
+	 * 5) Data is from the HID++ collection, in this case, we forward the
+	 * data to the corresponding child dj device and return 0 to hid-core
+	 * so he data also goes to the hidraw device of the receiver. This
+	 * allows a user space application to implement the full HID++ routing
+	 * via the receiver.
 	 */
 
 	spin_lock_irqsave(&djrcv_dev->lock, flags);
-	if (dj_report->report_id == REPORT_ID_DJ_SHORT) {
+	switch (data[0]) {
+	case REPORT_ID_DJ_SHORT:
 		switch (dj_report->report_type) {
 		case REPORT_TYPE_NOTIF_DEVICE_PAIRED:
 		case REPORT_TYPE_NOTIF_DEVICE_UNPAIRED:
@@ -694,6 +840,13 @@ static int logi_dj_raw_event(struct hid_device *hdev,
 			logi_dj_recv_forward_report(djrcv_dev, dj_report);
 		}
 		report_processed = true;
+		break;
+	case REPORT_ID_HIDPP_SHORT:
+		/* intentional fallthrough */
+	case REPORT_ID_HIDPP_LONG:
+		logi_dj_recv_forward_hidpp(djrcv_dev, data, size);
+		report_processed = false;
+		break;
 	}
 	spin_unlock_irqrestore(&djrcv_dev->lock, flags);
 
@@ -706,9 +859,6 @@ static int logi_dj_probe(struct hid_device *hdev,
 	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
 	struct dj_receiver_dev *djrcv_dev;
 	int retval;
-
-	if (is_dj_device((struct dj_device *)hdev->driver_data))
-		return -ENODEV;
 
 	dbg_hid("%s called for ifnum %d\n", __func__,
 		intf->cur_altsetting->desc.bInterfaceNumber);
@@ -862,22 +1012,6 @@ static void logi_dj_remove(struct hid_device *hdev)
 	hid_set_drvdata(hdev, NULL);
 }
 
-static int logi_djdevice_probe(struct hid_device *hdev,
-			 const struct hid_device_id *id)
-{
-	int ret;
-	struct dj_device *dj_dev = hdev->driver_data;
-
-	if (!is_dj_device(dj_dev))
-		return -ENODEV;
-
-	ret = hid_parse(hdev);
-	if (!ret)
-		ret = hid_hw_start(hdev, HID_CONNECT_DEFAULT);
-
-	return ret;
-}
-
 static const struct hid_device_id logi_dj_receivers[] = {
 	{HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH,
 		USB_DEVICE_ID_LOGITECH_UNIFYING_RECEIVER)},
@@ -901,17 +1035,14 @@ static struct hid_driver logi_djreceiver_driver = {
 
 
 static const struct hid_device_id logi_dj_devices[] = {
-	{HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH,
-		USB_DEVICE_ID_LOGITECH_UNIFYING_RECEIVER)},
-	{HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH,
-		USB_DEVICE_ID_LOGITECH_UNIFYING_RECEIVER_2)},
+	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_GENERIC,
+		USB_VENDOR_ID_LOGITECH, HID_ANY_ID)},
 	{}
 };
 
 static struct hid_driver logi_djdevice_driver = {
 	.name = "logitech-djdevice",
 	.id_table = logi_dj_devices,
-	.probe = logi_djdevice_probe,
 };
 
 

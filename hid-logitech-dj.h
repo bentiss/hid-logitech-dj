@@ -25,6 +25,11 @@
 
 #include <linux/kfifo.h>
 
+#ifndef HID_GROUP_LOGITECH_DJ_DEVICE_GENERIC
+#define HID_GROUP_LOGITECH_DJ_DEVICE_GENERIC	0x0005
+#define HID_GROUP_LOGITECH_DJ_DEVICE_WTP	0x0006
+#endif
+
 #define DJ_MAX_PAIRED_DEVICES			6
 #define DJ_MAX_NUMBER_NOTIFICATIONS		8
 #define DJ_DEVICE_INDEX_MIN 			1
@@ -35,6 +40,12 @@
 
 #define REPORT_ID_DJ_SHORT			0x20
 #define REPORT_ID_DJ_LONG			0x21
+
+#define REPORT_ID_HIDPP_SHORT			0x10
+#define REPORT_ID_HIDPP_LONG			0x11
+
+#define HIDPP_REPORT_SHORT_LENGTH		7
+#define HIDPP_REPORT_LONG_LENGTH		20
 
 #define REPORT_TYPE_RFREPORT_FIRST		0x01
 #define REPORT_TYPE_RFREPORT_LAST		0x1F
@@ -101,6 +112,7 @@ struct dj_receiver_dev {
 	struct work_struct work;
 	struct kfifo notif_fifo;
 	spinlock_t lock;
+	bool querying_devices;
 };
 
 struct dj_device {
@@ -109,15 +121,5 @@ struct dj_device {
 	u32 reports_supported;
 	u8 device_index;
 };
-
-/**
- * is_dj_device - know if the given dj_device is not the receiver.
- * @dj_dev: the dj device to test
- *
- * This macro tests if a struct dj_device pointer is a device created
- * by the bus enumarator.
- */
-#define is_dj_device(dj_dev) \
-	(&(dj_dev)->dj_receiver_dev->hdev->dev == (dj_dev)->hdev->dev.parent)
 
 #endif
