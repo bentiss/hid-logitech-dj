@@ -42,6 +42,7 @@ MODULE_LICENSE("GPL");
 
 #define WTP_QUIRK_MANUAL_RESOLUTION			BIT(0)
 #define WTP_QUIRK_NO_MECHANICAL_BUTTONS			BIT(1)
+#define WTP_QUIRK_HID_INPUT				BIT(2)
 
 
 struct wtp_data {
@@ -259,11 +260,21 @@ static void wtp_device_connect(struct hidpp_device *hidpp_dev, bool connected)
 	wtp_init(hidpp_dev);
 }
 
+static int wtp_input_mapping(struct hid_device *hdev, struct hid_input *hi,
+		struct hid_field *field, struct hid_usage *usage,
+		unsigned long **bit, int *max)
+{
+	if (field->application == HID_GD_MOUSE)
+		return -1;
+	return 0;
+}
+
 static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
 	struct wtp_data *wd;
 	struct hidpp_device *hidpp_dev;
 	int ret;
+	unsigned int connect_mask = HID_CONNECT_HIDRAW;
 	/* hunk for backport only ---> */
 
 	u16 product_id = id->product;
@@ -295,6 +306,9 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		wd->quirks = WTP_QUIRK_MANUAL_RESOLUTION |
 				WTP_QUIRK_NO_MECHANICAL_BUTTONS;
 		break;
+	case DJ_DEVICE_ID_TK820:
+		wd->quirks = WTP_QUIRK_HID_INPUT;
+		break;
 	};
 
 	/* <--- hunk for backport only */
@@ -305,9 +319,14 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 	hidpp_dev->device_connect = wtp_device_connect;
 
+	if (wd->quirks & WTP_QUIRK_HID_INPUT) {
+		hdev->quirks |= HID_QUIRK_NO_EMPTY_INPUT;
+		connect_mask = HID_CONNECT_DEFAULT;
+	}
+
 	ret = hid_parse(hdev);
 	if (!ret)
-		ret = hid_hw_start(hdev, HID_CONNECT_HIDRAW);
+		ret = hid_hw_start(hdev, connect_mask);
 
 	/* try init */
 	hid_device_io_start(hdev);
@@ -324,6 +343,9 @@ static const struct hid_device_id wtp_devices[] = {
 				WTP_QUIRK_NO_MECHANICAL_BUTTONS},
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
 		USB_VENDOR_ID_LOGITECH, DJ_DEVICE_ID_WIRELESS_TOUCHPAD_T650)},
+	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
+		USB_VENDOR_ID_LOGITECH, DJ_DEVICE_ID_TK820),
+		.driver_data = WTP_QUIRK_HID_INPUT},
 	/* hunk for backport only ---> */
 
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
@@ -338,6 +360,7 @@ static struct hid_driver wtp_driver = {
 	.name = "wtp-touch",
 	.id_table = wtp_devices,
 	.probe = wtp_probe,
+	.input_mapping = wtp_input_mapping,
 	.raw_event = wtp_raw_event,
 };
 
