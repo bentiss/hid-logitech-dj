@@ -659,6 +659,7 @@ void hidpp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev,
 	raw_xy->end_of_frame = data[8] & 0x01;
 	raw_xy->spurious_flag = (data[8] >> 1) & 0x01;
 	raw_xy->finger_count = data[15] & 0x0f;
+	raw_xy->button = (data[8] >> 2) & 0x01;
 
 	if (raw_xy->finger_count) {
 		hidpp_touchpad_touch_event(&data[2], &raw_xy->fingers[0]);

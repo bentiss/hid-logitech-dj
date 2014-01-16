@@ -212,6 +212,7 @@ struct hidpp_touchpad_raw_xy {
 	u8 spurious_flag;
 	u8 end_of_frame;
 	u8 finger_count;
+	u8 button;
 };
 
 extern int hidpp_touchpad_get_raw_info(struct hidpp_device *hidpp_dev,
