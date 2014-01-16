@@ -48,6 +48,7 @@ struct wtp_data {
 	u8 mt_feature_index;
 	u8 button_feature_index;
 	u8 maxcontacts;
+	bool flip_y;
 };
 
 static int wtp_create_input(struct hidpp_device *hidpp_dev)
@@ -114,7 +115,8 @@ static void wtp_touch_event(struct wtp_data *wd,
 		input_event(wd->input, EV_ABS, ABS_MT_POSITION_X,
 				touch_report->x);
 		input_event(wd->input, EV_ABS, ABS_MT_POSITION_Y,
-				touch_report->y);
+				wd->flip_y ? wd->y_size - touch_report->y :
+					     touch_report->y);
 		/* input_event(wd->input, EV_ABS, ABS_MT_ORIENTATION, wide); */
 		input_event(wd->input, EV_ABS, ABS_MT_PRESSURE,
 				touch_report->area);
@@ -218,6 +220,7 @@ static int wtp_init(struct hidpp_device *hidpp_dev)
 	wd->x_size = raw_info.x_size;
 	wd->y_size = raw_info.y_size;
 	wd->maxcontacts = raw_info.maxcontacts;
+	wd->flip_y = raw_info.origin == TOUCHPAD_RAW_XY_ORIGIN_LOWER_LEFT;
 
 	return wtp_create_input(hidpp_dev);
 };
