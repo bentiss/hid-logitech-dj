@@ -128,8 +128,7 @@ static void wtp_touch_event(struct wtp_data *wd,
 //		touch_report->area, touch_report->finger_id);
 }
 
-static int wtp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev,
-		struct hidpp_report *report)
+static int wtp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev, u8 *data)
 {
 	struct hidpp_touchpad_raw_xy raw;
 	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
@@ -137,7 +136,7 @@ static int wtp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev,
 	if (!wd->input)
 		return 0;
 
-	hidpp_touchpad_raw_xy_event(hidpp_dev, report, &raw);
+	hidpp_touchpad_raw_xy_event(hidpp_dev, data, &raw);
 
 	if (raw.finger_count) {
 		wtp_touch_event(wd, &(raw.fingers[0]));
@@ -171,7 +170,7 @@ static int wtp_raw_event(struct hid_device *hdev, struct hid_report *hreport,
 	    (report->fap.feature_index == wd->mt_feature_index) &&
 	    ((report->fap.funcindex_clientid == EVENT_TOUCHPAD_RAW_XY) ||
 	     (report->fap.funcindex_clientid == EVENT_TOUCHPAD_RAW_XY_))) {
-		return wtp_touchpad_raw_xy_event(hidpp_dev, report);
+		return wtp_touchpad_raw_xy_event(hidpp_dev, report->fap.params);
 	}
 
 	if (data[0] == 0x02) {

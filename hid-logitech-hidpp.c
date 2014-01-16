@@ -636,61 +636,33 @@ int hidpp_touchpad_set_raw_report_state(struct hidpp_device *hidpp_dev,
 }
 EXPORT_SYMBOL_GPL(hidpp_touchpad_set_raw_report_state);
 
-struct touch_hidpp_report {
-	u8 x_m;
-	u8 x_l;
-	u8 y_m;
-	u8 y_l;
-	u8 z;
-	u8 area;
-	u8 id;
-};
-
-struct dual_touch_hidpp_report {
-	u8 report_id;
-	u8 device_index;
-	u8 feature_index;
-	u8 broadcast_event;
-	u16 timestamp;
-	struct touch_hidpp_report touches[2];
-};
-
-static void hidpp_touchpad_touch_event(struct touch_hidpp_report *touch_report,
+static void hidpp_touchpad_touch_event(u8 *data,
 	struct hidpp_touchpad_raw_xy_finger *finger)
 {
-	u8 x_m = touch_report->x_m << 2;
-	u8 y_m = touch_report->y_m << 2;
+	u8 x_m = data[0] << 2;
+	u8 y_m = data[2] << 2;
 
-	finger->contact_type = touch_report->x_m >> 6;
-	finger->x = x_m << 6 | touch_report->x_l;
+	finger->x = x_m << 6 | data[1];
+	finger->y = y_m << 6 | data[3];
 
-	finger->contact_status = touch_report->y_m >> 6;
-	finger->y = y_m << 6 | touch_report->y_l;
+	finger->contact_type = data[0] >> 6;
+	finger->contact_status = data[2] >> 6;
 
-	finger->finger_id = touch_report->id >> 4;
-	finger->z = touch_report->z;
-	finger->area = touch_report->area;
+	finger->z = data[4];
+	finger->area = data[5];
+	finger->finger_id = data[6] >> 4;
 }
 
 void hidpp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev,
-		struct hidpp_report *hidpp_report,
-		struct hidpp_touchpad_raw_xy *raw_xy)
+		u8 *data, struct hidpp_touchpad_raw_xy *raw_xy)
 {
-	struct dual_touch_hidpp_report *dual_touch_report;
-
-	dual_touch_report = (struct dual_touch_hidpp_report *)hidpp_report;
-	raw_xy->end_of_frame = dual_touch_report->touches[0].id & 0x01;
-	raw_xy->spurious_flag = (dual_touch_report->touches[0].id >> 1) & 0x01;
-	raw_xy->finger_count = dual_touch_report->touches[1].id & 0x0f;
+	raw_xy->end_of_frame = data[8] & 0x01;
+	raw_xy->spurious_flag = (data[8] >> 1) & 0x01;
+	raw_xy->finger_count = data[15] & 0x0f;
 
 	if (raw_xy->finger_count) {
-		hidpp_touchpad_touch_event(&dual_touch_report->touches[0],
-				&raw_xy->fingers[0]);
-		if ((raw_xy->end_of_frame && raw_xy->finger_count == 4) ||
-			(!raw_xy->end_of_frame && raw_xy->finger_count >= 2))
-			hidpp_touchpad_touch_event(
-					&dual_touch_report->touches[1],
-					&raw_xy->fingers[1]);
+		hidpp_touchpad_touch_event(&data[2], &raw_xy->fingers[0]);
+		hidpp_touchpad_touch_event(&data[9], &raw_xy->fingers[1]);
 	}
 }
 EXPORT_SYMBOL_GPL(hidpp_touchpad_raw_xy_event);
