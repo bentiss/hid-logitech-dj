@@ -56,6 +56,7 @@ struct wtp_data {
 	bool flip_y;
 	unsigned int resolution;
 	unsigned int quirks;
+	unsigned int finger_seen;
 };
 
 static int wtp_create_input(struct hidpp_device *hidpp_dev)
@@ -149,17 +150,16 @@ static int wtp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev, u8 *data)
 {
 	struct hidpp_touchpad_raw_xy raw;
 	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
+	int i;
 
 	if (!wd->input)
 		return 0;
 
 	hidpp_touchpad_raw_xy_event(hidpp_dev, data, &raw);
 
-	if (raw.finger_count) {
-		wtp_touch_event(wd, &(raw.fingers[0]));
-		if ((raw.end_of_frame && raw.finger_count == 4) ||
-			(!raw.end_of_frame && raw.finger_count >= 2))
-			wtp_touch_event(wd, &(raw.fingers[1]));
+	for (i = 0; i < 2 && wd->finger_seen < raw.finger_count; i++) {
+		wtp_touch_event(wd, &(raw.fingers[i]));
+		wd->finger_seen++;
 	}
 
 	if (raw.end_of_frame)
@@ -168,6 +168,7 @@ static int wtp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev, u8 *data)
 	if (raw.end_of_frame || raw.finger_count <= 2) {
 		input_mt_sync_frame(wd->input);
 		input_sync(wd->input);
+		wd->finger_seen = 0;
 	}
 
 	return 1;
