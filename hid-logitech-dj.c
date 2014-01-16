@@ -362,7 +362,6 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	}
 
 	dj_hiddev->group = logi_dj_recv_get_device_group(dj_hiddev);
-	dj_hiddev->product = le16_to_cpu(usbdev->descriptor.idProduct);
 
 	usb_make_path(usbdev, dj_hiddev->phys, sizeof(dj_hiddev->phys));
 	snprintf(tmpstr, sizeof(tmpstr), ":%d", dj_report->device_index);
@@ -384,6 +383,13 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	dj_hiddev->driver_data = dj_dev;
 
 	djrcv_dev->paired_dj_devices[dj_report->device_index] = dj_dev;
+
+	/* hunk for backport only ---> */
+
+	dj_dev->wpid = dj_hiddev->product;
+	dj_hiddev->product = le16_to_cpu(usbdev->descriptor.idProduct);
+
+	/* <--- hunk for backport only */
 
 	if (hid_add_device(dj_hiddev)) {
 		dev_err(&djrcv_hdev->dev, "%s: failed adding dj_device\n",

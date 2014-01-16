@@ -38,6 +38,9 @@ MODULE_LICENSE("GPL");
 #include "hid-logitech-dj.h"
 #include "hid-logitech-hidpp.h"
 
+#define WTP_MANUAL_RESOLUTION				1000
+
+#define WTP_QUIRK_MANUAL_RESOLUTION			BIT(0)
 
 struct wtp_data {
 	struct input_dev *input;
@@ -50,6 +53,7 @@ struct wtp_data {
 	u8 maxcontacts;
 	bool flip_y;
 	unsigned int resolution;
+	unsigned int quirks;
 };
 
 static int wtp_create_input(struct hidpp_device *hidpp_dev)
@@ -225,6 +229,8 @@ static int wtp_init(struct hidpp_device *hidpp_dev)
 	wd->maxcontacts = raw_info.maxcontacts;
 	wd->flip_y = raw_info.origin == TOUCHPAD_RAW_XY_ORIGIN_LOWER_LEFT;
 	wd->resolution = raw_info.res;
+	if (wd->quirks & WTP_QUIRK_MANUAL_RESOLUTION)
+		wd->resolution = WTP_MANUAL_RESOLUTION;
 
 	return wtp_create_input(hidpp_dev);
 };
@@ -246,6 +252,12 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	struct wtp_data *wd;
 	struct hidpp_device *hidpp_dev;
 	int ret;
+	/* hunk for backport only ---> */
+
+	u16 product_id = id->product;
+	struct dj_device *dj_dev = hdev->driver_data;
+
+	/* <--- hunk for backport only */
 
 	hidpp_dev = devm_hidpp_allocate(hdev);
 	if (!hidpp_dev) {
@@ -258,6 +270,21 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		hid_err(hdev, "cannot allocate wtp Touch data\n");
 		return -ENOMEM;
 	}
+
+	wd->quirks = id->driver_data;
+
+	/* hunk for backport only ---> */
+
+	if (dj_dev)
+		product_id = dj_dev->wpid;
+
+	switch (product_id) {
+	case DJ_DEVICE_ID_WIRELESS_TOUCHPAD:
+		wd->quirks = WTP_QUIRK_MANUAL_RESOLUTION;
+		break;
+	};
+
+	/* <--- hunk for backport only */
 
 	hidpp_set_drvdata(hidpp_dev, wd);
 
@@ -279,7 +306,16 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 static const struct hid_device_id wtp_devices[] = {
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
+		USB_VENDOR_ID_LOGITECH, DJ_DEVICE_ID_WIRELESS_TOUCHPAD),
+		.driver_data = WTP_QUIRK_MANUAL_RESOLUTION},
+	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
+		USB_VENDOR_ID_LOGITECH, DJ_DEVICE_ID_WIRELESS_TOUCHPAD_T650)},
+	/* hunk for backport only ---> */
+
+	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
 		USB_VENDOR_ID_LOGITECH, HID_ANY_ID)},
+
+	/* <--- hunk for backport only */
 	{ }
 };
 MODULE_DEVICE_TABLE(hid, wtp_devices);
