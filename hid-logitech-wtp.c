@@ -252,12 +252,16 @@ static void wtp_device_connect(struct hidpp_device *hidpp_dev, bool connected)
 {
 	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
 
-	pr_err("%s connected: %d %s:%d\n", __func__, connected, __FILE__, __LINE__);
-
-	if (wd->input || !connected)
+	if (!connected)
 		return;
 
-	wtp_init(hidpp_dev);
+	if (wd->input) {
+		hidpp_touchpad_set_raw_report_state(hidpp_dev,
+							wd->mt_feature_index,
+							true, true, true);
+	} else {
+		wtp_init(hidpp_dev);
+	}
 }
 
 static int wtp_input_mapping(struct hid_device *hdev, struct hid_input *hi,
