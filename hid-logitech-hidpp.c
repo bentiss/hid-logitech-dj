@@ -485,6 +485,7 @@ int hidpp_root_get_protocol_version(struct hidpp_device *hidpp_dev,
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(hidpp_root_get_protocol_version);
 
 /* -------------------------------------------------------------------------- */
 /* 0x0005: GetDeviceNameType                                                  */
