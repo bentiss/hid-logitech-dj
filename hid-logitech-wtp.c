@@ -57,7 +57,6 @@ struct wtp_data {
 	bool flip_y;
 	unsigned int resolution;
 	unsigned int quirks;
-	unsigned int finger_seen;
 };
 
 static int wtp_create_input(struct hidpp_device *hidpp_dev)
@@ -118,7 +117,13 @@ static void wtp_button_event(struct wtp_data *wd, bool button)
 static void wtp_touch_event(struct wtp_data *wd,
 	struct hidpp_touchpad_raw_xy_finger *touch_report)
 {
-	int slot = input_mt_get_slot_by_key(wd->input, touch_report->finger_id);
+	int slot;
+
+	if (!touch_report->finger_id || touch_report->contact_type)
+		/* no actual data */
+		return;
+
+	slot = input_mt_get_slot_by_key(wd->input, touch_report->finger_id);
 
 	input_mt_slot(wd->input, slot);
 	input_mt_report_slot_state(wd->input, MT_TOOL_FINGER,
@@ -147,30 +152,36 @@ static void wtp_touch_event(struct wtp_data *wd,
 //		touch_report->area, touch_report->finger_id);
 }
 
+static void wtp_send_raw_xy_event(struct hidpp_device *hidpp_dev,
+		struct hidpp_touchpad_raw_xy *raw)
+{
+	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
+	int i;
+
+	for (i = 0; i < 2; i++)
+		wtp_touch_event(wd, &(raw->fingers[i]));
+
+	if (raw->end_of_frame)
+		wtp_button_event(wd, raw->button);
+
+	if (raw->end_of_frame || raw->finger_count <= 2) {
+		input_mt_sync_frame(wd->input);
+		input_sync(wd->input);
+	}
+}
+
+
 static int wtp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev, u8 *data)
 {
 	struct hidpp_touchpad_raw_xy raw;
 	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
-	int i;
 
 	if (!wd->input)
 		return 0;
 
 	hidpp_touchpad_raw_xy_event(hidpp_dev, data, &raw);
 
-	for (i = 0; i < 2 && wd->finger_seen < raw.finger_count; i++) {
-		wtp_touch_event(wd, &(raw.fingers[i]));
-		wd->finger_seen++;
-	}
-
-	if (raw.end_of_frame)
-		wtp_button_event(wd, raw.button);
-
-	if (raw.end_of_frame || raw.finger_count <= 2) {
-		input_mt_sync_frame(wd->input);
-		input_sync(wd->input);
-		wd->finger_seen = 0;
-	}
+	wtp_send_raw_xy_event(hidpp_dev, &raw);
 
 	return 1;
 }
