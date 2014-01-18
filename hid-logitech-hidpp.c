@@ -36,6 +36,42 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Benjamin Tissoires <benjamin.tissoires@gmail.com>");
 MODULE_AUTHOR("Nestor Lopez Casado <nlopezcasad@logitech.com>");
 
+	/* hunk for backport only ---> */
+
+#define hid_hw_request hidpp_hid_hw_request
+
+static void hidpp_hid_hw_request(struct hid_device *hdev, struct hid_report *rep,
+		int reqtype)
+{
+	char *buf;
+	int len = ((rep->size - 1) >> 3) + 2;
+
+	if (hdev->ll_driver->request) {
+		hdev->ll_driver->request(hdev, rep, reqtype);
+		return;
+	}
+
+	if (!hdev->hid_output_raw_report)
+		return;
+
+	buf = kzalloc(len, GFP_KERNEL);
+	if (!buf)
+		return;
+
+	switch (reqtype) {
+	case HID_REQ_GET_REPORT:
+		break;
+	case HID_REQ_SET_REPORT:
+		hid_output_report(rep, buf);
+		hdev->hid_output_raw_report(hdev, buf, len, rep->type);
+		break;
+	}
+
+	kfree(buf);
+}
+
+	/* <--- hunk for backport only */
+
 static int __hidpp_send_report(struct hid_device *hdev,
 				struct hidpp_report *hidpp_report)
 {

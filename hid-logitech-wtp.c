@@ -43,6 +43,7 @@ MODULE_LICENSE("GPL");
 #define WTP_QUIRK_MANUAL_RESOLUTION			BIT(0)
 #define WTP_QUIRK_NO_MECHANICAL_BUTTONS			BIT(1)
 #define WTP_QUIRK_HID_INPUT				BIT(2)
+#define WTP_QUIRK_RAW_IN_MOUSE				BIT(3)
 
 
 struct wtp_data {
@@ -170,6 +171,47 @@ static void wtp_send_raw_xy_event(struct hidpp_device *hidpp_dev,
 	}
 }
 
+static int wtp_mouse_raw_xy_event(struct hidpp_device *hidpp_dev, u8 *data)
+{
+	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
+	u8 c1_area = ((data[7] & 0xf) * (data[7] & 0xf) +
+		      (data[7] >> 4) * (data[7] >> 4)) / 2;
+	u8 c2_area = ((data[13] & 0xf) * (data[13] & 0xf) +
+		      (data[13] >> 4) * (data[13] >> 4)) / 2;
+	struct hidpp_touchpad_raw_xy raw = {
+		.timestamp = data[1],
+		.fingers = {
+			{
+				.contact_type = 0,
+				.contact_status = !!data[7],
+				.x = (data[4] << 8) | data[3],
+				.y = (data[6] << 8) | data[5],
+				.z = c1_area,
+				.area = c1_area,
+				.finger_id = data[2],
+			}, {
+				.contact_type = 0,
+				.contact_status = !!data[13],
+				.x = (data[10] << 8) | data[9],
+				.y = (data[12] << 8) | data[11],
+				.z = c2_area,
+				.area = c2_area,
+				.finger_id = data[8],
+			}
+		},
+		.finger_count = wd->maxcontacts,
+		.spurious_flag = 0,
+		.end_of_frame = (data[0] >> 7) == 0,
+		.button = data[0] & 0x01,
+	};
+
+	if (!wd->input)
+		return 0;
+
+	wtp_send_raw_xy_event(hidpp_dev, &raw);
+
+	return 1;
+}
 
 static int wtp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev, u8 *data)
 {
@@ -207,9 +249,13 @@ static int wtp_raw_event(struct hid_device *hdev, struct hid_report *hreport,
 	}
 
 	if (data[0] == 0x02) {
-		input_event(wd->input, EV_KEY, BTN_LEFT, !!(data[1] & 0x01));
-		input_event(wd->input, EV_KEY, BTN_RIGHT, !!(data[1] & 0x02));
-		input_sync(wd->input);
+		if (wd->quirks & WTP_QUIRK_RAW_IN_MOUSE) {
+			return wtp_mouse_raw_xy_event(hidpp_dev, &data[7]);
+		} else {
+			input_event(wd->input, EV_KEY, BTN_LEFT, !!(data[1] & 0x01));
+			input_event(wd->input, EV_KEY, BTN_RIGHT, !!(data[1] & 0x02));
+			input_sync(wd->input);
+		}
 	}
 
 	return 0;
@@ -243,8 +289,9 @@ static int wtp_init(struct hidpp_device *hidpp_dev)
 		wd->name = "Logitech Wireless Touchpad";
 	}
 
-	hidpp_touchpad_set_raw_report_state(hidpp_dev, wd->mt_feature_index,
-		true, true, true);
+	if (!(wd->quirks & WTP_QUIRK_RAW_IN_MOUSE))
+		hidpp_touchpad_set_raw_report_state(hidpp_dev,
+			wd->mt_feature_index, true, true, true);
 	hidpp_touchpad_get_raw_info(hidpp_dev, wd->mt_feature_index,
 		&raw_info);
 
@@ -267,9 +314,9 @@ static void wtp_device_connect(struct hidpp_device *hidpp_dev, bool connected)
 		return;
 
 	if (wd->input) {
-		hidpp_touchpad_set_raw_report_state(hidpp_dev,
-							wd->mt_feature_index,
-							true, true, true);
+		if (!(wd->quirks & WTP_QUIRK_RAW_IN_MOUSE))
+			hidpp_touchpad_set_raw_report_state(hidpp_dev,
+				wd->mt_feature_index, true, true, true);
 	} else {
 		wtp_init(hidpp_dev);
 	}
@@ -324,6 +371,9 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	case DJ_DEVICE_ID_TK820:
 		wd->quirks = WTP_QUIRK_HID_INPUT;
 		break;
+	case BT_DEVICE_ID_WIRELESS_TOUCHPAD_T651:
+		wd->quirks = WTP_QUIRK_RAW_IN_MOUSE;
+		break;
 	};
 
 	/* <--- hunk for backport only */
@@ -361,6 +411,9 @@ static const struct hid_device_id wtp_devices[] = {
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
 		USB_VENDOR_ID_LOGITECH, DJ_DEVICE_ID_TK820),
 		.driver_data = WTP_QUIRK_HID_INPUT},
+	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_LOGITECH,
+		BT_DEVICE_ID_WIRELESS_TOUCHPAD_T651),
+		.driver_data = WTP_QUIRK_RAW_IN_MOUSE},
 	/* hunk for backport only ---> */
 
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
