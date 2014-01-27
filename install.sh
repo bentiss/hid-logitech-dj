@@ -1,42 +1,69 @@
 #!/bin/bash
 
-if [[ `id -u` != 0 ]]
+declare -A mod_names
+mod_names["hid-logitech-wtp"]="wtp-touch"
+mod_names["hid-logitech-dj"]="logitech-djreceiver"
+
+BLK_DRIVER=hid-generic
+
+UDEV_RULES_PATH=/etc/udev/rules.d
+SYSTEMD_SERVICES_PATH=/etc/systemd/system
+
+TEST=$1
+
+if [ ! x"$TEST" == x"" ]
 then
-  echo "Must be run as root"
-  exit 1
+	UDEV_PATH=.
+	RULES_DIR=.
 fi
 
-WORKING_DIR=$(pwd)
-PRIMARY_TARGET=hid-logitech-dj.ko
-TARGETS="hid-logitech-dj.ko hid-logitech-hidpp.ko hid-logitech-wtp.ko"
+UDEV_RULE=${UDEV_RULES_PATH}/01-${BLK_DRIVER}-blacklist.rules
+SYSTEMD_SERVICE=${SYSTEMD_SERVICES_PATH}/${BLK_DRIVER}-blacklist@.service
 
-INSTALL_PATH=/lib/modules/`uname -r`/kernel/drivers/hid
-
-# check if the modules are compiled
-if [[ ! -e $WORKING_DIR/${PRIMARY_TARGET} ]]
+if [ x"$TEST" == x"" ]
 then
-  echo "please run make before install."
-  echo "Aborting"
-  exit 1
-fi
-
-# backup shipped modules
-cd $INSTALL_PATH
-for TARGET in TARGETS
-do
-	if [[ ! -e ${TARGET}.orig ]]
+	if [[ `id -u` != 0 ]]
 	then
-	  mv ${TARGET} ${TARGET}.orig
+		echo "Must be run as root"
+		exit 1
 	fi
+fi
 
+SED_EXPR="s/MODULE_ALIAS(\"hid:b\(.*\)g\(.*\)v0000\(.*\)p0000\(.*\)\");/KERNEL==\"\1:\3:\4.*\", TAG+=\"systemd\", ENV{SYSTEMD_WANTS}+=\"${BLK_DRIVER}-blacklist@%kGOOD_DRIVER_NAME.service\"/"
 
-	cd $WORKING_DIR
-	echo ${TARGET} "->" ${INSTALL_PATH}/${TARGET}
-	cp ${TARGET} ${INSTALL_PATH}/${TARGET}
+cat > ${UDEV_RULE} <<EOF
+ACTION!="add|change", GOTO="hid_generic_end"
+DRIVER!="hid-generic", GOTO="hid_generic_end"
+
+EOF
+
+for mod in *.mod.c
+do
+	DRIVER=${mod/.mod.c/}
+	GOOD_NAME=${mod_names["${DRIVER}"]}
+	grep MODULE_ALIAS ${mod} | grep "g\*" | \
+		sed "${SED_EXPR/GOOD_DRIVER_NAME/${GOOD_NAME}}" | \
+		grep -v MODULE_ALIAS | \
+		sort \
+			>> ${UDEV_RULE}
 done
 
-echo "depmod -a"
-depmod -a
+cat >> ${UDEV_RULE} <<EOF
 
-echo "update-initramfs -u"
-update-initramfs -u
+LABEL="hid_generic_end"
+EOF
+
+cat > ${SYSTEMD_SERVICE} <<EOF
+[Unit]
+Description=blacklist for hid-generic devices
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c "\\
+	echo \`expr match %i '\(....:....:....\.....\).*'\` > /sys/bus/hid/drivers/\`expr match %p '\(.*\)-blacklist'\`/unbind ;\\
+	echo \`expr match %i '\(....:....:....\.....\).*'\` > /sys/bus/hid/drivers/\`expr match %i '....:....:....\.....\(.*\)'\`/bind ;\\
+	"
+
+#echo ${DEVICE} > ${HID_DRV_PATH}/${BLK_DRIVER}/unbind
+#echo ${DEVICE} > ${HID_DRV_PATH}/${GOOD_DRIVER}/bind
+EOF

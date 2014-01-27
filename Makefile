@@ -9,6 +9,7 @@ default:
 
 install: hid-logitech-dj.ko hid-logitech-hidpp.ko hid-logitech-wtp.ko
 	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules_install
+	/bin/bash install.sh
 
 uninstall:
 	/bin/bash restore.sh
