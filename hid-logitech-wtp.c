@@ -329,12 +329,6 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	struct hidpp_device *hidpp_dev;
 	int ret;
 	unsigned int connect_mask = HID_CONNECT_HIDRAW;
-	/* hunk for backport only ---> */
-
-	u16 product_id = id->product;
-	struct dj_device *dj_dev = hdev->driver_data;
-
-	/* <--- hunk for backport only */
 
 	hidpp_dev = devm_hidpp_allocate(hdev);
 	if (!hidpp_dev) {
@@ -349,25 +343,6 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	}
 
 	wd->quirks = id->driver_data;
-
-	/* hunk for backport only ---> */
-
-	if (dj_dev)
-		product_id = dj_dev->wpid;
-
-	switch (product_id) {
-	case DJ_DEVICE_ID_WIRELESS_TOUCHPAD:
-		wd->quirks = WTP_QUIRK_NO_MECHANICAL_BUTTONS;
-		break;
-	case DJ_DEVICE_ID_TK820:
-		wd->quirks = WTP_QUIRK_HID_INPUT;
-		break;
-	case BT_DEVICE_ID_WIRELESS_TOUCHPAD_T651:
-		wd->quirks = WTP_QUIRK_RAW_IN_MOUSE;
-		break;
-	};
-
-	/* <--- hunk for backport only */
 
 	hidpp_set_drvdata(hidpp_dev, wd);
 
@@ -404,12 +379,6 @@ static const struct hid_device_id wtp_devices[] = {
 	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_LOGITECH,
 		BT_DEVICE_ID_WIRELESS_TOUCHPAD_T651),
 		.driver_data = WTP_QUIRK_RAW_IN_MOUSE},
-	/* hunk for backport only ---> */
-
-	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
-		USB_VENDOR_ID_LOGITECH, HID_ANY_ID)},
-
-	/* <--- hunk for backport only */
 	{ }
 };
 MODULE_DEVICE_TABLE(hid, wtp_devices);

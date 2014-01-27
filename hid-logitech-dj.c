@@ -294,6 +294,40 @@ static u16 logi_dj_recv_get_device_group(struct hid_device *hdev)
 	return HID_GROUP_LOGITECH_DJ_DEVICE_GENERIC;
 }
 
+/* hunk for backport only ---> */
+
+static int dj_hid_add_device(struct hid_device *hdev)
+{
+	static atomic_t id = ATOMIC_INIT(0);
+	int ret;
+
+	if (WARN_ON(hdev->status & HID_STAT_ADDED))
+		return -EBUSY;
+
+	/*
+	 * Read the device report descriptor once and use as template
+	 * for the driver-specific modifications.
+	 */
+	ret = hdev->ll_driver->parse(hdev);
+	if (ret)
+		return ret;
+	if (!hdev->dev_rdesc)
+		return -ENODEV;
+
+	/* XXX hack, any other cleaner solution after the driver core
+	 * is converted to allow more than 20 bytes as the device name? */
+	dev_set_name(&hdev->dev, "%04X:%04X:%04X.%04X", hdev->bus,
+		     hdev->vendor, hdev->product, atomic_inc_return(&id));
+
+	ret = device_add(&hdev->dev);
+	if (!ret)
+		hdev->status |= HID_STAT_ADDED;
+
+	return ret;
+}
+
+/* <--- hunk for backport only */
+
 static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 					  struct dj_report *dj_report)
 {
@@ -386,14 +420,7 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 
 	djrcv_dev->paired_dj_devices[dj_report->device_index] = dj_dev;
 
-	/* hunk for backport only ---> */
-
-	dj_dev->wpid = dj_hiddev->product;
-	dj_hiddev->product = le16_to_cpu(usbdev->descriptor.idProduct);
-
-	/* <--- hunk for backport only */
-
-	if (hid_add_device(dj_hiddev)) {
+	if (dj_hid_add_device(dj_hiddev)) { /* add "dj_" for backport only */
 		dev_err(&djrcv_hdev->dev, "%s: failed adding dj_device\n",
 			__func__);
 		goto hid_add_device_fail;

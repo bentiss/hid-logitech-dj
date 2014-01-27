@@ -111,9 +111,6 @@ struct dj_device {
 	struct dj_receiver_dev *dj_receiver_dev;
 	u32 reports_supported;
 	u8 device_index;
-	/* hunk for backport only ---> */
-	u16 wpid;
-	/* <--- hunk for backport only */
 };
 
 #endif
