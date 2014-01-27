@@ -645,7 +645,7 @@ int hidpp_touchpad_get_raw_info(struct hidpp_device *hidpp_dev,
 EXPORT_SYMBOL_GPL(hidpp_touchpad_get_raw_info);
 
 int hidpp_touchpad_set_raw_report_state(struct hidpp_device *hidpp_dev,
-		u8 feature_index, bool send_raw_reports, bool force_vs_area,
+		u8 feature_index, bool send_raw_reports,
 		bool sensor_enhanced_settings)
 {
 	struct hidpp_report response;
@@ -653,15 +653,14 @@ int hidpp_touchpad_set_raw_report_state(struct hidpp_device *hidpp_dev,
 
 	/*
 	 * Params:
-	 *   0x01 - enable raw
-	 *   0x02 - 16bit Z, no area
-	 *   0x04 - enhanced sensitivity
-	 *   0x08 - width, height instead of area
-	 *   0x10 - send raw + gestures (degrades smoothness)
+	 *   bit 0 - enable raw
+	 *   bit 1 - 16bit Z, no area
+	 *   bit 2 - enhanced sensitivity
+	 *   bit 3 - width, height (4 bits each) instead of area
+	 *   bit 4 - send raw + gestures (degrades smoothness)
 	 *   remaining bits - reserved
 	 */
-	u8 params = send_raw_reports | force_vs_area << 1 |
-				sensor_enhanced_settings << 2;
+	u8 params = send_raw_reports | (sensor_enhanced_settings << 2);
 
 	ret = hidpp_send_fap_command_sync(hidpp_dev, feature_index,
 		CMD_TOUCHPAD_SET_RAW_REPORT_STATE, &params, 1, &response);

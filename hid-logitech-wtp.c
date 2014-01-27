@@ -257,6 +257,15 @@ static int wtp_raw_event(struct hid_device *hdev, struct hid_report *hreport,
 	return 0;
 }
 
+static int wtp_set_raw_mode(struct hidpp_device *hidpp_dev)
+{
+	struct wtp_data *wd = hidpp_get_drvdata(hidpp_dev);
+
+	return hidpp_touchpad_set_raw_report_state(hidpp_dev,
+			wd->mt_feature_index,
+			!(wd->quirks & WTP_QUIRK_RAW_IN_MOUSE), true);
+}
+
 static int wtp_init(struct hidpp_device *hidpp_dev)
 {
 	struct hidpp_touchpad_raw_info raw_info;
@@ -285,9 +294,8 @@ static int wtp_init(struct hidpp_device *hidpp_dev)
 		wd->name = "Logitech Wireless Touchpad";
 	}
 
-	if (!(wd->quirks & WTP_QUIRK_RAW_IN_MOUSE))
-		hidpp_touchpad_set_raw_report_state(hidpp_dev,
-			wd->mt_feature_index, true, true, true);
+	wtp_set_raw_mode(hidpp_dev);
+
 	hidpp_touchpad_get_raw_info(hidpp_dev, wd->mt_feature_index,
 		&raw_info);
 
@@ -309,13 +317,10 @@ static void wtp_device_connect(struct hidpp_device *hidpp_dev, bool connected)
 	if (!connected)
 		return;
 
-	if (wd->input) {
-		if (!(wd->quirks & WTP_QUIRK_RAW_IN_MOUSE))
-			hidpp_touchpad_set_raw_report_state(hidpp_dev,
-				wd->mt_feature_index, true, true, true);
-	} else {
+	if (wd->input)
+		wtp_set_raw_mode(hidpp_dev);
+	else
 		wtp_init(hidpp_dev);
-	}
 }
 
 static int wtp_input_mapping(struct hid_device *hdev, struct hid_input *hi,

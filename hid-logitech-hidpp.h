@@ -218,7 +218,7 @@ extern int hidpp_touchpad_get_raw_info(struct hidpp_device *hidpp_dev,
 	u8 feature_index, struct hidpp_touchpad_raw_info *raw_info);
 
 extern int hidpp_touchpad_set_raw_report_state(struct hidpp_device *hidpp_dev,
-		u8 feature_index, bool send_raw_reports, bool force_vs_area,
+		u8 feature_index, bool send_raw_reports,
 		bool sensor_enhanced_settings);
 
 extern void hidpp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev,
