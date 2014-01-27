@@ -86,9 +86,6 @@ static int wtp_create_input(struct hidpp_device *hidpp_dev)
 
 	__set_bit(EV_ABS, input_dev->evbit);
 
-	input_mt_init_slots(input_dev, wd->maxcontacts, INPUT_MT_POINTER |
-		INPUT_MT_DROP_UNUSED);
-
 	input_set_capability(input_dev, EV_KEY, BTN_TOUCH);
 	input_set_capability(input_dev, EV_KEY, BTN_LEFT);
 	input_set_capability(input_dev, EV_KEY, BTN_RIGHT);
@@ -100,8 +97,9 @@ static int wtp_create_input(struct hidpp_device *hidpp_dev)
 	input_abs_set_res(input_dev, ABS_MT_POSITION_X, wd->resolution);
 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y, 0, wd->y_size, 0, 0);
 	input_abs_set_res(input_dev, ABS_MT_POSITION_Y, wd->resolution);
-	input_set_abs_params(input_dev, ABS_X, 0, wd->x_size, 0, 0);
-	input_set_abs_params(input_dev, ABS_Y, 0, wd->y_size, 0, 0);
+
+	input_mt_init_slots(input_dev, wd->maxcontacts, INPUT_MT_POINTER |
+		INPUT_MT_DROP_UNUSED);
 
 	wd->input = input_dev;
 
