@@ -243,8 +243,7 @@ static int wtp_raw_event(struct hid_device *hdev, struct hid_report *hreport,
 
 	if ((data[0] == REPORT_ID_HIDPP_LONG) &&
 	    (report->fap.feature_index == wd->mt_feature_index) &&
-	    ((report->fap.funcindex_clientid == EVENT_TOUCHPAD_RAW_XY) ||
-	     (report->fap.funcindex_clientid == EVENT_TOUCHPAD_RAW_XY_))) {
+	    (report->fap.funcindex_clientid == EVENT_TOUCHPAD_RAW_XY)) {
 		return wtp_touchpad_raw_xy_event(hidpp_dev, report->fap.params);
 	}
 

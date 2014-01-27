@@ -179,8 +179,7 @@ extern char *hidpp_get_device_name(struct hidpp_device *hidpp_dev,
 
 #define HIDPP_PAGE_TOUCHPAD_RAW_XY			0x6100
 
-#define EVENT_TOUCHPAD_RAW_XY				0x30
-#define EVENT_TOUCHPAD_RAW_XY_				0x00
+#define EVENT_TOUCHPAD_RAW_XY				0x00
 
 #define TOUCHPAD_RAW_XY_ORIGIN_LOWER_LEFT		0x01
 #define TOUCHPAD_RAW_XY_ORIGIN_UPPER_LEFT		0x03
