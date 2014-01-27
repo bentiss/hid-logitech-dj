@@ -40,10 +40,9 @@ MODULE_LICENSE("GPL");
 
 #define WTP_MANUAL_RESOLUTION				1000
 
-#define WTP_QUIRK_MANUAL_RESOLUTION			BIT(0)
-#define WTP_QUIRK_NO_MECHANICAL_BUTTONS			BIT(1)
-#define WTP_QUIRK_HID_INPUT				BIT(2)
-#define WTP_QUIRK_RAW_IN_MOUSE				BIT(3)
+#define WTP_QUIRK_NO_MECHANICAL_BUTTONS			BIT(0)
+#define WTP_QUIRK_HID_INPUT				BIT(1)
+#define WTP_QUIRK_RAW_IN_MOUSE				BIT(2)
 
 
 struct wtp_data {
@@ -299,7 +298,7 @@ static int wtp_init(struct hidpp_device *hidpp_dev)
 	wd->maxcontacts = raw_info.maxcontacts;
 	wd->flip_y = raw_info.origin == TOUCHPAD_RAW_XY_ORIGIN_LOWER_LEFT;
 	wd->resolution = raw_info.res;
-	if (wd->quirks & WTP_QUIRK_MANUAL_RESOLUTION)
+	if (!wd->resolution)
 		wd->resolution = WTP_MANUAL_RESOLUTION;
 
 	return wtp_create_input(hidpp_dev);
@@ -364,8 +363,7 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 	switch (product_id) {
 	case DJ_DEVICE_ID_WIRELESS_TOUCHPAD:
-		wd->quirks = WTP_QUIRK_MANUAL_RESOLUTION |
-				WTP_QUIRK_NO_MECHANICAL_BUTTONS;
+		wd->quirks = WTP_QUIRK_NO_MECHANICAL_BUTTONS;
 		break;
 	case DJ_DEVICE_ID_TK820:
 		wd->quirks = WTP_QUIRK_HID_INPUT;
@@ -403,8 +401,7 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 static const struct hid_device_id wtp_devices[] = {
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
 		USB_VENDOR_ID_LOGITECH, DJ_DEVICE_ID_WIRELESS_TOUCHPAD),
-		.driver_data = WTP_QUIRK_MANUAL_RESOLUTION |
-				WTP_QUIRK_NO_MECHANICAL_BUTTONS},
+		.driver_data = WTP_QUIRK_NO_MECHANICAL_BUTTONS},
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
 		USB_VENDOR_ID_LOGITECH, DJ_DEVICE_ID_WIRELESS_TOUCHPAD_T650)},
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
