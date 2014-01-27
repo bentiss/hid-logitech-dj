@@ -49,7 +49,6 @@ struct wtp_data {
 	struct input_dev *input;
 	char *name;
 	u16 x_size, y_size;
-	u8 p_range, area_range;
 	u8 finger_count;
 	u8 mt_feature_index;
 	u8 button_feature_index;
@@ -90,8 +89,8 @@ static int wtp_create_input(struct hidpp_device *hidpp_dev)
 	input_set_capability(input_dev, EV_KEY, BTN_LEFT);
 	input_set_capability(input_dev, EV_KEY, BTN_RIGHT);
 
-	input_set_abs_params(input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
-	input_set_abs_params(input_dev, ABS_MT_TOUCH_MINOR, 0, 255, 0, 0);
+	/* Max pressure is not given by the devices, pick one */
+	input_set_abs_params(input_dev, ABS_MT_PRESSURE, 0, 50, 0, 0);
 
 	input_set_abs_params(input_dev, ABS_MT_POSITION_X, 0, wd->x_size, 0, 0);
 	input_abs_set_res(input_dev, ABS_MT_POSITION_X, wd->resolution);
@@ -127,21 +126,13 @@ static void wtp_touch_event(struct wtp_data *wd,
 	input_mt_report_slot_state(wd->input, MT_TOOL_FINGER,
 					touch_report->contact_status);
 	if (touch_report->contact_status) {
-		/* this finger is on the screen */
-		/* int wide = (s->w > s->h); */
-		/* int major = max(s->w, s->h) >> 1; */
-		/* int minor = min(s->w, s->h) >> 1; */
-
 		input_event(wd->input, EV_ABS, ABS_MT_POSITION_X,
 				touch_report->x);
 		input_event(wd->input, EV_ABS, ABS_MT_POSITION_Y,
 				wd->flip_y ? wd->y_size - touch_report->y :
 					     touch_report->y);
-		/* input_event(wd->input, EV_ABS, ABS_MT_ORIENTATION, wide); */
 		input_event(wd->input, EV_ABS, ABS_MT_PRESSURE,
 				touch_report->area);
-		/* input_event(wd->input, EV_ABS, ABS_MT_TOUCH_MAJOR, major); */
-		/* input_event(wd->input, EV_ABS, ABS_MT_TOUCH_MINOR, minor); */
 	}
 
 //	pr_err("touch Type:%d Status:%d X:%d Y:%d Z:%d Area:%d I:%d\n",
