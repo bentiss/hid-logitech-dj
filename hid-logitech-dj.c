@@ -696,10 +696,19 @@ static int logi_dj_output_hidraw_report(struct hid_device *hid, u8 * buf,
 					size_t count,
 					unsigned char report_type)
 {
-	/* Called by hid raw to send data */
-	dbg_hid("%s\n", __func__);
+	struct dj_device *djdev = hid->driver_data;
+	struct dj_receiver_dev *djrcv_dev = djdev->dj_receiver_dev;
+	u8 *out_buf;
+	int ret;
 
-	return 0;
+	if ((buf[0] == REPORT_ID_HIDPP_LONG) ||
+	    (buf[0] == REPORT_ID_HIDPP_SHORT)) {
+		buf[1] = djdev->device_index;
+		return djrcv_dev->hdev->hid_output_raw_report(djrcv_dev->hdev,
+			buf, count, report_type);
+	}
+
+	return -EINVAL;
 }
 
 static void logi_dj_ll_request(struct hid_device *hid, struct hid_report *rep,

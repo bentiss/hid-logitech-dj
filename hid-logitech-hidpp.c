@@ -36,55 +36,17 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Benjamin Tissoires <benjamin.tissoires@gmail.com>");
 MODULE_AUTHOR("Nestor Lopez Casado <nlopezcasad@logitech.com>");
 
-	/* hunk for backport only ---> */
-
-#define hid_hw_request hidpp_hid_hw_request
-
-static void hidpp_hid_hw_request(struct hid_device *hdev, struct hid_report *rep,
-		int reqtype)
-{
-	char *buf;
-	int len = ((rep->size - 1) >> 3) + 2;
-
-	if (hdev->ll_driver->request) {
-		hdev->ll_driver->request(hdev, rep, reqtype);
-		return;
-	}
-
-	if (!hdev->hid_output_raw_report)
-		return;
-
-	buf = kzalloc(len, GFP_KERNEL);
-	if (!buf)
-		return;
-
-	switch (reqtype) {
-	case HID_REQ_GET_REPORT:
-		break;
-	case HID_REQ_SET_REPORT:
-		hid_output_report(rep, buf);
-		hdev->hid_output_raw_report(hdev, buf, len, rep->type);
-		break;
-	}
-
-	kfree(buf);
-}
-
-	/* <--- hunk for backport only */
-
 static int __hidpp_send_report(struct hid_device *hdev,
 				struct hidpp_report *hidpp_report)
 {
-	struct hid_report* report;
-	struct hid_report_enum *output_report_enum;
-	int i, fields_count;
+	int fields_count, ret;
 
 	switch (hidpp_report->report_id) {
 	case REPORT_ID_HIDPP_SHORT:
-		fields_count = HIDPP_REPORT_SHORT_LENGTH - 2;
+		fields_count = HIDPP_REPORT_SHORT_LENGTH;
 		break;
 	case REPORT_ID_HIDPP_LONG:
-		fields_count = HIDPP_REPORT_LONG_LENGTH - 2;
+		fields_count = HIDPP_REPORT_LONG_LENGTH;
 		break;
 	default:
 		return -ENODEV;
@@ -96,16 +58,10 @@ static int __hidpp_send_report(struct hid_device *hdev,
 	 */
 	hidpp_report->device_index = 0xff;
 
-	output_report_enum = &hdev->report_enum[HID_OUTPUT_REPORT];
-	report = output_report_enum->report_id_hash[hidpp_report->report_id];
+	ret = hdev->hid_output_raw_report(hdev, (u8 *)hidpp_report,
+		fields_count, HID_OUTPUT_REPORT);
 
-	hid_set_field(report->field[0], 0, hidpp_report->device_index);
-	for (i = 0; i < fields_count; i++)
-		hid_set_field(report->field[0], i+1, hidpp_report->rawbytes[i]);
-
-	hid_hw_request(hdev, report, HID_REQ_SET_REPORT);
-
-	return 0;
+	return ret == fields_count ? 0 : -1;
 }
 
 static int hidpp_send_message_sync(struct hidpp_device *hidpp_dev,
