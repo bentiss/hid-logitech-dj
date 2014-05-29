@@ -1,7 +1,8 @@
 /*
  *  HID driver for Logitech Unifying receivers
  *
- *  Copyright (c) 2011 Logitech
+ *  Copyright (c) 2011 Logitech (c)
+ *  Copyright (c) 2013-2014 Red Hat Inc.
  */
 
 /*
@@ -257,9 +258,11 @@ static const u8 hid_reportid_size_map[NUMBER_OF_HID_REPORTS] = {
 
 static struct hid_ll_driver logi_dj_ll_driver;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0)
 static int logi_dj_output_hidraw_report(struct hid_device *hid, u8 * buf,
 					size_t count,
 					unsigned char report_type);
+#endif
 static int logi_dj_recv_query_paired_devices(struct dj_receiver_dev *djrcv_dev);
 
 static void logi_dj_recv_destroy_djhid_device(struct dj_receiver_dev *djrcv_dev,
@@ -307,6 +310,16 @@ static int dj_hid_add_device(struct hid_device *hdev)
 
 	if (WARN_ON(hdev->status & HID_STAT_ADDED))
 		return -EBUSY;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 15, 0)
+	/*
+	 * Check for the mandatory transport channel.
+	 */
+	 if (!hdev->ll_driver->raw_request) {
+		hid_err(hdev, "transport driver missing .raw_request()\n");
+		return -EINVAL;
+	 }
+#endif
 
 	/*
 	 * Read the device report descriptor once and use as template
@@ -376,14 +389,17 @@ static void logi_dj_recv_add_djhid_device(struct dj_receiver_dev *djrcv_dev,
 	}
 
 	dj_hiddev->ll_driver = &logi_dj_ll_driver;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0)
 	dj_hiddev->hid_output_raw_report = logi_dj_output_hidraw_report;
+#endif
 
 	dj_hiddev->dev.parent = &djrcv_hdev->dev;
 	dj_hiddev->bus = BUS_USB;
 	dj_hiddev->vendor = le16_to_cpu(usbdev->descriptor.idVendor);
 	dj_hiddev->product =
-		(dj_report->report_params[ \
-			DEVICE_PAIRED_PARAM_EQUAD_ID_MSB] << 8) |
+		(dj_report->report_params[DEVICE_PAIRED_PARAM_EQUAD_ID_MSB]
+									<< 8) |
 		dj_report->report_params[DEVICE_PAIRED_PARAM_EQUAD_ID_LSB];
 	snprintf(dj_hiddev->name, sizeof(dj_hiddev->name),
 		"Logitech Unifying Device. Wireless PID:%04x",
@@ -591,7 +607,7 @@ static void logi_dj_recv_forward_report(struct dj_receiver_dev *djrcv_dev,
 }
 
 static void logi_dj_recv_forward_hidpp(struct dj_receiver_dev *djrcv_dev,
-			u8 * data, int size)
+			u8 *data, int size)
 {
 	/* We are called from atomic context (tasklet && djrcv->lock held) */
 
@@ -696,6 +712,7 @@ static void logi_dj_ll_close(struct hid_device *hid)
 	dbg_hid("%s:%s\n", __func__, hid->phys);
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0)
 static int logi_dj_output_hidraw_report(struct hid_device *hid, u8 * buf,
 					size_t count,
 					unsigned char report_type)
@@ -705,8 +722,8 @@ static int logi_dj_output_hidraw_report(struct hid_device *hid, u8 * buf,
 	u8 *out_buf;
 	int ret;
 
-	if ((buf[0] == REPORT_ID_HIDPP_LONG) ||
-	    (buf[0] == REPORT_ID_HIDPP_SHORT)) {
+	if ((buf[0] == REPORT_ID_HIDPP_SHORT) ||
+	    (buf[0] == REPORT_ID_HIDPP_LONG)) {
 		buf[1] = djdev->device_index;
 		return djrcv_dev->hdev->hid_output_raw_report(djrcv_dev->hdev,
 			buf, count, report_type);
@@ -732,6 +749,45 @@ static int logi_dj_output_hidraw_report(struct hid_device *hid, u8 * buf,
 	kfree(out_buf);
 	return ret;
 }
+#else
+static int logi_dj_ll_raw_request(struct hid_device *hid,
+				  unsigned char reportnum, __u8 *buf,
+				  size_t count, unsigned char report_type,
+				  int reqtype)
+{
+	struct dj_device *djdev = hid->driver_data;
+	struct dj_receiver_dev *djrcv_dev = djdev->dj_receiver_dev;
+	u8 *out_buf;
+	int ret;
+
+	if ((buf[0] == REPORT_ID_HIDPP_SHORT) ||
+	    (buf[0] == REPORT_ID_HIDPP_LONG)) {
+		buf[1] = djdev->device_index;
+		return hid_hw_raw_request(djrcv_dev->hdev, reportnum, buf,
+				count, report_type, reqtype);
+	}
+
+	if (buf[0] != REPORT_TYPE_LEDS)
+		return -EINVAL;
+
+	out_buf = kzalloc(DJREPORT_SHORT_LENGTH, GFP_ATOMIC);
+	if (!out_buf)
+		return -ENOMEM;
+
+	if (count < DJREPORT_SHORT_LENGTH - 2)
+		count = DJREPORT_SHORT_LENGTH - 2;
+
+	out_buf[0] = REPORT_ID_DJ_SHORT;
+	out_buf[1] = djdev->device_index;
+	memcpy(out_buf + 2, buf, count);
+
+	ret = hid_hw_raw_request(djrcv_dev->hdev, REPORT_ID_DJ_SHORT, out_buf,
+		DJREPORT_SHORT_LENGTH, report_type, reqtype);
+
+	kfree(out_buf);
+	return ret;
+}
+#endif
 
 static void rdcat(char *rdesc, unsigned int *rsize, const char *data, unsigned int size)
 {
@@ -816,6 +872,9 @@ static struct hid_ll_driver logi_dj_ll_driver = {
 	.stop = logi_dj_ll_stop,
 	.open = logi_dj_ll_open,
 	.close = logi_dj_ll_close,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 15, 0)
+	.raw_request = logi_dj_ll_raw_request,
+#endif
 };
 
 

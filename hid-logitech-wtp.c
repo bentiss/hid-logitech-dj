@@ -2,26 +2,14 @@
  *  HID driver for Logitech Wireless Touchpad device
  *
  *  Copyright (c) 2011 Logitech (c)
+ *  Copyright (c) 2012-2013 Google (c)
+ *  Copyright (c) 2013-2014 Red Hat Inc.
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
-
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- * Should you need to contact me, the author, you can do so by e-mail send
- * your message to Benjamin Tissoires <benjamin.tissoires at gmail com>
- *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; version 2 of the License.
  */
 
 #include <linux/device.h>
@@ -40,7 +28,7 @@ MODULE_LICENSE("GPL");
 
 #define WTP_MANUAL_RESOLUTION				1000
 
-#define WTP_QUIRK_NO_MECHANICAL_BUTTONS			BIT(0)
+#define WTP_QUIRK_PHYSICAL_BUTTONS			BIT(0)
 #define WTP_QUIRK_HID_INPUT				BIT(1)
 #define WTP_QUIRK_RAW_IN_MOUSE				BIT(2)
 
@@ -77,25 +65,23 @@ static int wtp_create_input(struct hidpp_device *hidpp_dev)
 	input_dev->id.product = hdev->product;
 	input_dev->id.version = 0;
 
-	__set_bit(BTN_TOUCH, input_dev->keybit);
-	__set_bit(BTN_TOOL_FINGER, input_dev->keybit);
-	__set_bit(BTN_TOOL_DOUBLETAP, input_dev->keybit);
-	__set_bit(BTN_TOOL_TRIPLETAP, input_dev->keybit);
-	__set_bit(BTN_TOOL_QUADTAP, input_dev->keybit);
-
 	__set_bit(EV_ABS, input_dev->evbit);
-
-	input_set_capability(input_dev, EV_KEY, BTN_TOUCH);
-	input_set_capability(input_dev, EV_KEY, BTN_LEFT);
-	input_set_capability(input_dev, EV_KEY, BTN_RIGHT);
-
-	/* Max pressure is not given by the devices, pick one */
-	input_set_abs_params(input_dev, ABS_MT_PRESSURE, 0, 50, 0, 0);
+	__set_bit(EV_KEY, input_dev->evbit);
 
 	input_set_abs_params(input_dev, ABS_MT_POSITION_X, 0, wd->x_size, 0, 0);
 	input_abs_set_res(input_dev, ABS_MT_POSITION_X, wd->resolution);
 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y, 0, wd->y_size, 0, 0);
 	input_abs_set_res(input_dev, ABS_MT_POSITION_Y, wd->resolution);
+
+	/* Max pressure is not given by the devices, pick one */
+	input_set_abs_params(input_dev, ABS_MT_PRESSURE, 0, 50, 0, 0);
+
+	input_set_capability(input_dev, EV_KEY, BTN_LEFT);
+
+	if (wd->quirks & WTP_QUIRK_PHYSICAL_BUTTONS)
+		input_set_capability(input_dev, EV_KEY, BTN_RIGHT);
+	else
+		__set_bit(INPUT_PROP_BUTTONPAD, input_dev->propbit);
 
 	input_mt_init_slots(input_dev, wd->maxcontacts, INPUT_MT_POINTER |
 		INPUT_MT_DROP_UNUSED);
@@ -107,7 +93,7 @@ static int wtp_create_input(struct hidpp_device *hidpp_dev)
 
 static void wtp_button_event(struct wtp_data *wd, bool button)
 {
-	if (!(wd->quirks & WTP_QUIRK_NO_MECHANICAL_BUTTONS))
+	if (!(wd->quirks & WTP_QUIRK_PHYSICAL_BUTTONS))
 		input_event(wd->input, EV_KEY, BTN_LEFT, button);
 }
 
@@ -239,8 +225,10 @@ static int wtp_raw_event(struct hid_device *hdev, struct hid_report *hreport,
 		if (wd->quirks & WTP_QUIRK_RAW_IN_MOUSE) {
 			return wtp_mouse_raw_xy_event(hidpp_dev, &data[7]);
 		} else {
-			input_event(wd->input, EV_KEY, BTN_LEFT, !!(data[1] & 0x01));
-			input_event(wd->input, EV_KEY, BTN_RIGHT, !!(data[1] & 0x02));
+			input_event(wd->input, EV_KEY, BTN_LEFT,
+					!!(data[1] & 0x01));
+			input_event(wd->input, EV_KEY, BTN_RIGHT,
+					!!(data[1] & 0x02));
 			input_sync(wd->input);
 		}
 	}
@@ -269,11 +257,9 @@ static int wtp_init(struct hidpp_device *hidpp_dev)
 
 	ret = hidpp_root_get_feature(hidpp_dev, HIDPP_PAGE_TOUCHPAD_RAW_XY,
 		&wd->mt_feature_index, &feature_type);
-	if (ret) {
-		pr_err("%s  %s:%d\n", __func__, __FILE__, __LINE__);
+	if (ret)
 		/* means that the device is not powered up */
 		return ret;
-	}
 
 	name = hidpp_get_device_name(hidpp_dev, &name_length);
 	if (name) {
@@ -370,7 +356,7 @@ static int wtp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 static const struct hid_device_id wtp_devices[] = {
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
 		USB_VENDOR_ID_LOGITECH, DJ_DEVICE_ID_WIRELESS_TOUCHPAD),
-		.driver_data = WTP_QUIRK_NO_MECHANICAL_BUTTONS},
+		.driver_data = WTP_QUIRK_PHYSICAL_BUTTONS},
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,
 		USB_VENDOR_ID_LOGITECH, DJ_DEVICE_ID_WIRELESS_TOUCHPAD_T650)},
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE_WTP,

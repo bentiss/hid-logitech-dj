@@ -3,24 +3,13 @@
  *
  *  Copyright (c) 2011 Logitech (c)
  *  Copyright (c) 2012-2013 Google (c)
- *  Copyright (c) 2013 Red Hat Inc.
+ *  Copyright (c) 2013-2014 Red Hat Inc.
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
-
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; version 2 of the License.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -58,8 +47,9 @@ static int __hidpp_send_report(struct hid_device *hdev,
 	 */
 	hidpp_report->device_index = 0xff;
 
-	ret = hdev->hid_output_raw_report(hdev, (u8 *)hidpp_report,
-		fields_count, HID_OUTPUT_REPORT);
+	ret = hid_hw_raw_request(hdev, hidpp_report->report_id,
+		(u8 *)hidpp_report, fields_count, HID_OUTPUT_REPORT,
+		HID_REQ_SET_REPORT);
 
 	return ret == fields_count ? 0 : -1;
 }
@@ -113,18 +103,21 @@ int hidpp_send_fap_command_sync(struct hidpp_device *hidpp_dev,
 	u8 feat_index, u8 funcindex_clientid, u8 *params, int param_count,
 	struct hidpp_report *response)
 {
-	struct hidpp_report message;
+	struct hidpp_report *message = kzalloc(sizeof(struct hidpp_report),
+			GFP_KERNEL);
+	int ret;
 
-	if (param_count > sizeof(message.fap.params))
+	if (param_count > sizeof(message->fap.params))
 		return -EINVAL;
 
-	memset(&message, 0, sizeof(message));
-	message.report_id = REPORT_ID_HIDPP_LONG;
-	message.fap.feature_index = feat_index;
-	message.fap.funcindex_clientid = funcindex_clientid;
-	memcpy(&message.fap.params, params, param_count);
+	message->report_id = REPORT_ID_HIDPP_LONG;
+	message->fap.feature_index = feat_index;
+	message->fap.funcindex_clientid = funcindex_clientid;
+	memcpy(&message->fap.params, params, param_count);
 
-	return hidpp_send_message_sync(hidpp_dev, &message, response);
+	ret = hidpp_send_message_sync(hidpp_dev, message, response);
+	kfree(message);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(hidpp_send_fap_command_sync);
 
@@ -132,22 +125,25 @@ int hidpp_send_rap_command_sync(struct hidpp_device *hidpp_dev,
 	u8 report_id, u8 sub_id, u8 reg_address, u8 *params, int param_count,
 	struct hidpp_report *response)
 {
-	struct hidpp_report message;
+	struct hidpp_report *message = kzalloc(sizeof(struct hidpp_report),
+			GFP_KERNEL);
+	int ret;
 
 	if ((report_id != REPORT_ID_HIDPP_SHORT) &&
 	    (report_id != REPORT_ID_HIDPP_LONG))
 		return -EINVAL;
 
-	if (param_count > sizeof(message.rap.params))
+	if (param_count > sizeof(message->rap.params))
 		return -EINVAL;
 
-	memset(&message, 0, sizeof(message));
-	message.report_id = report_id;
-	message.rap.sub_id = sub_id;
-	message.rap.reg_address = reg_address;
-	memcpy(&message.rap.params, params, param_count);
+	message->report_id = report_id;
+	message->rap.sub_id = sub_id;
+	message->rap.reg_address = reg_address;
+	memcpy(&message->rap.params, params, param_count);
 
-	return hidpp_send_message_sync(hidpp_dev, &message, response);
+	ret = hidpp_send_message_sync(hidpp_dev, message, response);
+	kfree(message);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(hidpp_send_rap_command_sync);
 
@@ -648,6 +644,7 @@ static void hidpp_touchpad_touch_event(u8 *data,
 void hidpp_touchpad_raw_xy_event(struct hidpp_device *hidpp_dev,
 		u8 *data, struct hidpp_touchpad_raw_xy *raw_xy)
 {
+	memset(raw_xy, 0, sizeof(struct hidpp_touchpad_raw_xy));
 	raw_xy->end_of_frame = data[8] & 0x01;
 	raw_xy->spurious_flag = (data[8] >> 1) & 0x01;
 	raw_xy->finger_count = data[15] & 0x0f;

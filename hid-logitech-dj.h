@@ -4,7 +4,8 @@
 /*
  *  HID driver for Logitech Unifying receivers
  *
- *  Copyright (c) 2011 Logitech
+ *  Copyright (c) 2011 Logitech (c)
+ *  Copyright (c) 2013-2014 Red Hat Inc.
  */
 
 /*

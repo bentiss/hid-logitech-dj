@@ -6,36 +6,24 @@
  *
  *  Copyright (c) 2011 Logitech (c)
  *  Copyright (c) 2012-2013 Google (c)
- *  Copyright (c) 2013 Red Hat Inc.
+ *  Copyright (c) 2013-2014 Red Hat Inc.
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- * Should you need to contact me, the author, you can do so by e-mail send
- * your message to Benjamin Tissoires <benjamin.tissoires at gmail com>
- *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; version 2 of the License.
  */
 
 #include <linux/kfifo.h>
+#include "compat.h"
 
 #ifndef HID_GROUP_LOGITECH_DJ_DEVICE_GENERIC
-#define HID_GROUP_LOGITECH_DJ_DEVICE_GENERIC	0x0005
+#define HID_GROUP_LOGITECH_DJ_DEVICE_GENERIC	0x0101
 #endif
 
 #ifndef HID_GROUP_LOGITECH_DJ_DEVICE_WTP
-#define HID_GROUP_LOGITECH_DJ_DEVICE_WTP	0x0006
+#define HID_GROUP_LOGITECH_DJ_DEVICE_WTP	0x0102
 #endif
 
 #define REPORT_ID_HIDPP_SHORT			0x10
