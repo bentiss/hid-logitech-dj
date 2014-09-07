@@ -1,6 +1,7 @@
 obj-m	+= hid-logitech-dj.o
 obj-m	+= hid-logitech-hidpp.o
 obj-m	+= hid-logitech-wtp.o
+obj-m	+= hid-logitech-m560.o
 
 KDIR := /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
